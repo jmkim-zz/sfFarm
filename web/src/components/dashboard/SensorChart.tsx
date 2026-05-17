@@ -44,16 +44,18 @@ export function SensorChart({ deviceId }: { deviceId: string }) {
     <div className="p-6 bg-white rounded-2xl shadow-sm border border-gray-100 mt-6">
       <h3 className="text-lg font-bold text-gray-800 mb-6">온습도 변화 추이 (최근 30건 누적 데이터)</h3>
       
-      <div className="h-80 w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+      <div className="w-full overflow-x-auto pb-2">
+        {/* ResponsiveContainer가 0으로 수축되는 버그를 막기 위해 명시적인 크기(px)를 강제 부여합니다. */}
+        <div style={{ minWidth: '600px', height: '320px' }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData} margin={{ top: 5, right: 30, bottom: 5, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
             {/* X축: 시간 */}
             <XAxis dataKey="time" tick={{ fontSize: 12 }} tickMargin={10} stroke="#888888" />
-            {/* 왼쪽 Y축: 온도 */}
-            <YAxis yAxisId="left" tick={{ fontSize: 12 }} stroke="#888888" />
-            {/* 오른쪽 Y축: 습도 (스케일이 다르므로 축을 분리) */}
-            <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} stroke="#888888" />
+            {/* 왼쪽 Y축: 온도 (값 차이가 적을 때 선이 바닥 축에 붙어버리는 현상 방지를 위해 위아래 여백을 줌) */}
+            <YAxis yAxisId="left" domain={['dataMin - 2', 'dataMax + 2']} tick={{ fontSize: 12 }} stroke="#888888" />
+            {/* 오른쪽 Y축: 습도 */}
+            <YAxis yAxisId="right" orientation="right" domain={['dataMin - 5', 'dataMax + 5']} tick={{ fontSize: 12 }} stroke="#888888" />
             
             <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
             <Legend wrapperStyle={{ paddingTop: '20px' }} />
@@ -62,6 +64,7 @@ export function SensorChart({ deviceId }: { deviceId: string }) {
             <Line yAxisId="right" connectNulls type="linear" dataKey="humidity" name="습도 (%)" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
           </LineChart>
         </ResponsiveContainer>
+        </div>
       </div>
     </div>
   );
