@@ -1,0 +1,16 @@
+# Environments
+*.env
+*.env.*
+
+# Python / Raspberry Pi
+venv/
+__pycache__/
+*.pyc
+# Node.js / Next.js / Web
+node_modules/
+.next/
+npm-debug.log*
+yarn-error.log*
+# OS files
+.DS_Store
+Thumbs.db
