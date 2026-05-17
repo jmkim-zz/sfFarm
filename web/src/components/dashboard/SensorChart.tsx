@@ -14,41 +14,23 @@ export function SensorChart({ deviceId }: { deviceId: string }) {
     setIsMounted(true);
   }, []);
 
-  // ================= [디버깅용 UI 패널] =================
-  const debugPanel = (
-    <div className="mb-4 p-4 bg-gray-900 text-green-400 font-mono text-xs rounded-lg overflow-x-auto shadow-inner">
-      <p className="font-bold text-white mb-2 pb-2 border-b border-gray-700">🐛 차트 디버그 모드 (임시)</p>
-      <p>1. 클라이언트 렌더링 완료 (isMounted): <span className={isMounted ? 'text-blue-400' : 'text-red-400'}>{String(isMounted)}</span></p>
-      <p>2. API 로딩 상태 (loading): <span className={loading ? 'text-yellow-400' : 'text-blue-400'}>{String(loading)}</span></p>
-      <p>3. 에러 발생 (error): <span className={error ? 'text-red-400' : 'text-gray-400'}>{error ? error.message : '없음'}</span></p>
-      <p>4. 수신된 데이터 배열 길이: <span className="text-pink-400">{data ? data.length : 'undefined (0)'}</span> 건</p>
-      {data && data.length > 0 && (
-        <div className="mt-2 text-gray-300">
-          <p>5. [0]번째 과거 데이터 샘플:</p>
-          <pre className="mt-1 bg-gray-950 p-2 rounded text-[10px]">{JSON.stringify(data[0], null, 2)}</pre>
-          <p className="mt-2">6. [마지막]번째 최신 데이터 샘플:</p>
-          <pre className="mt-1 bg-gray-950 p-2 rounded text-[10px]">{JSON.stringify(data[data.length - 1], null, 2)}</pre>
-        </div>
-      )}
-    </div>
-  );
-  // ====================================================
-
   if (loading) {
-    return <div className="p-6 bg-white rounded-2xl shadow-sm border border-gray-100 h-auto min-h-[20rem] flex flex-col items-center justify-center text-gray-500 font-medium">{debugPanel}<p>데이터를 불러오는 중...</p></div>;
+    return <div className="p-6 bg-white rounded-2xl shadow-sm border border-gray-100 h-80 flex items-center justify-center text-gray-500 font-medium">데이터를 불러오는 중...</div>;
   }
 
   if (error) {
-    return <div className="p-6 bg-white rounded-2xl shadow-sm border border-gray-100 h-auto min-h-[20rem] flex flex-col items-center justify-center text-red-500 font-medium">{debugPanel}<p>데이터 로드 실패: {error.message}</p></div>;
+    return <div className="p-6 bg-white rounded-2xl shadow-sm border border-gray-100 h-80 flex items-center justify-center text-red-500 font-medium">데이터 로드 실패: {error.message}</div>;
   }
 
   // 브라우저에 화면이 로드되기 전이거나 데이터가 비어있으면 차트를 렌더링하지 않습니다.
   if (!isMounted || !data || data.length === 0) {
-    return <div className="p-6 bg-white rounded-2xl shadow-sm border border-gray-100 h-auto min-h-[20rem] flex flex-col text-gray-500 font-medium">{debugPanel}<div className="flex-1 flex items-center justify-center text-orange-500 font-bold">차트를 그릴 데이터가 없습니다! (데이터 길이 0)</div></div>;
+    return <div className="p-6 bg-white rounded-2xl shadow-sm border border-gray-100 h-80 flex items-center justify-center text-gray-500 font-medium">차트 준비 중...</div>;
   }
 
-  // 차트 X축이 왼쪽에서 오른쪽(과거->최신)으로 흐르도록 데이터를 뒤집고(reverse), 시간 포맷을 변환합니다.
-  const chartData = [...data].reverse().map(d => ({
+  // 차트 X축이 왼쪽에서 오른쪽(과거->최신)으로 흐르도록 데이터를 명시적으로 시간순(오름차순) 정렬합니다.
+  const chartData = [...data]
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    .map(d => ({
     ...d,
     time: new Date(d.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   }));
@@ -57,8 +39,6 @@ export function SensorChart({ deviceId }: { deviceId: string }) {
     <div className="p-6 bg-white rounded-2xl shadow-sm border border-gray-100 mt-6">
       <h3 className="text-lg font-bold text-gray-800 mb-6">온습도 변화 추이 (최근 30건 누적 데이터)</h3>
       
-      {debugPanel}
-
       <div className="h-80 w-full">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
