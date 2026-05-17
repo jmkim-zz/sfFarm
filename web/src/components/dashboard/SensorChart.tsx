@@ -16,8 +16,8 @@ export function SensorChart({ deviceId }: { deviceId: string }) {
     return <div className="p-6 bg-white rounded-2xl shadow-sm border border-gray-100 h-80 flex items-center justify-center text-red-500 font-medium">데이터 로드 실패: {error.message}</div>;
   }
 
-  // 차트 X축 출력을 위해 ISO 날짜 포맷을 '오후 2:30:15' 형식으로 변환합니다.
-  const chartData = data.map(d => ({
+  // 차트 X축이 왼쪽에서 오른쪽(과거->최신)으로 흐르도록 데이터를 뒤집고(reverse), 시간 포맷을 변환합니다.
+  const chartData = [...data].reverse().map(d => ({
     ...d,
     time: new Date(d.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   }));
@@ -39,8 +39,8 @@ export function SensorChart({ deviceId }: { deviceId: string }) {
             <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
             <Legend wrapperStyle={{ paddingTop: '20px' }} />
             
-            <Line yAxisId="left" type="monotone" dataKey="temperature" name="온도 (°C)" stroke="#ef4444" strokeWidth={3} dot={false} activeDot={{ r: 6 }} />
-            <Line yAxisId="right" type="monotone" dataKey="humidity" name="습도 (%)" stroke="#3b82f6" strokeWidth={3} dot={false} activeDot={{ r: 6 }} />
+            <Line yAxisId="left" type="monotone" dataKey="temperature" name="온도 (°C)" stroke="#ef4444" strokeWidth={3} dot={false} activeDot={{ r: 6 }} isAnimationActive={false} />
+            <Line yAxisId="right" type="monotone" dataKey="humidity" name="습도 (%)" stroke="#3b82f6" strokeWidth={3} dot={false} activeDot={{ r: 6 }} isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>
