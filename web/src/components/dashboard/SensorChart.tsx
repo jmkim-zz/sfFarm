@@ -37,6 +37,9 @@ export function SensorChart({ deviceId }: { deviceId: string }) {
     time: new Date(d.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   }));
 
+  // [디버깅] F12 개발자 도구 콘솔에서 최종 변환된 데이터를 확인합니다.
+  console.log('📊 최종 차트 데이터:', chartData);
+
   return (
     <div className="p-6 bg-white rounded-2xl shadow-sm border border-gray-100 mt-6">
       <h3 className="text-lg font-bold text-gray-800 mb-6">온습도 변화 추이 (최근 30건 누적 데이터)</h3>
@@ -55,8 +58,8 @@ export function SensorChart({ deviceId }: { deviceId: string }) {
             <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
             <Legend wrapperStyle={{ paddingTop: '20px' }} />
             
-            <Line yAxisId="left" connectNulls type="monotone" dataKey="temperature" name="온도 (°C)" stroke="#ef4444" strokeWidth={3} dot={true} activeDot={{ r: 6 }} isAnimationActive={false} />
-            <Line yAxisId="right" connectNulls type="monotone" dataKey="humidity" name="습도 (%)" stroke="#3b82f6" strokeWidth={3} dot={true} activeDot={{ r: 6 }} isAnimationActive={false} />
+            <Line yAxisId="left" connectNulls type="linear" dataKey="temperature" name="온도 (°C)" stroke="#ef4444" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+            <Line yAxisId="right" connectNulls type="linear" dataKey="humidity" name="습도 (%)" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
           </LineChart>
         </ResponsiveContainer>
       </div>
