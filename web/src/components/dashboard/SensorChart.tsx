@@ -31,7 +31,9 @@ export function SensorChart({ deviceId }: { deviceId: string }) {
   const chartData = [...data]
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
     .map(d => ({
-    ...d,
+    // DB 데이터가 문자열(String)일 경우 선 그리기가 실패하므로, 명시적으로 숫자(Number)로 강제 캐스팅합니다.
+    temperature: d.temperature != null ? Number(d.temperature) : null,
+    humidity: d.humidity != null ? Number(d.humidity) : null,
     time: new Date(d.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   }));
 
@@ -53,8 +55,8 @@ export function SensorChart({ deviceId }: { deviceId: string }) {
             <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
             <Legend wrapperStyle={{ paddingTop: '20px' }} />
             
-            <Line yAxisId="left" type="monotone" dataKey="temperature" name="온도 (°C)" stroke="#ef4444" strokeWidth={3} dot={false} activeDot={{ r: 6 }} isAnimationActive={false} />
-            <Line yAxisId="right" type="monotone" dataKey="humidity" name="습도 (%)" stroke="#3b82f6" strokeWidth={3} dot={false} activeDot={{ r: 6 }} isAnimationActive={false} />
+            <Line yAxisId="left" connectNulls type="monotone" dataKey="temperature" name="온도 (°C)" stroke="#ef4444" strokeWidth={3} dot={true} activeDot={{ r: 6 }} isAnimationActive={false} />
+            <Line yAxisId="right" connectNulls type="monotone" dataKey="humidity" name="습도 (%)" stroke="#3b82f6" strokeWidth={3} dot={true} activeDot={{ r: 6 }} isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>
