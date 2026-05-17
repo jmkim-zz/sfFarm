@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 // src/app/api/sensors/route.ts
 import { NextResponse } from 'next/server';
 
