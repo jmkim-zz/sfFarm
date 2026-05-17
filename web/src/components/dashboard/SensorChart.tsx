@@ -1,12 +1,18 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSensors } from '../../lib/hooks/useSensors';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 export function SensorChart({ deviceId }: { deviceId: string }) {
   // Supabase에서 특정 기기의 최근 30건 센서 데이터를 가져옵니다.
   const { data, loading, error } = useSensors(deviceId, 30);
+  const [isMounted, setIsMounted] = useState(false);
+
+  // Next.js SSR 환경에서 Recharts 렌더링 버그를 방지하기 위해 클라이언트 마운트 여부를 추적합니다.
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   if (loading) {
     return <div className="p-6 bg-white rounded-2xl shadow-sm border border-gray-100 h-80 flex items-center justify-center text-gray-500 font-medium">데이터를 불러오는 중...</div>;
@@ -14,6 +20,11 @@ export function SensorChart({ deviceId }: { deviceId: string }) {
 
   if (error) {
     return <div className="p-6 bg-white rounded-2xl shadow-sm border border-gray-100 h-80 flex items-center justify-center text-red-500 font-medium">데이터 로드 실패: {error.message}</div>;
+  }
+
+  // 브라우저에 화면이 로드되기 전이거나 데이터가 비어있으면 차트를 렌더링하지 않습니다.
+  if (!isMounted || !data || data.length === 0) {
+    return <div className="p-6 bg-white rounded-2xl shadow-sm border border-gray-100 h-80 flex items-center justify-center text-gray-500 font-medium">차트 준비 중...</div>;
   }
 
   // 차트 X축이 왼쪽에서 오른쪽(과거->최신)으로 흐르도록 데이터를 뒤집고(reverse), 시간 포맷을 변환합니다.
