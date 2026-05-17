@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import React from 'react';
 import { RealTimePanel } from '../../components/dashboard/RealTimePanel';
 import { SensorChart } from '../../components/dashboard/SensorChart';
