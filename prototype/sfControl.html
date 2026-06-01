@@ -1,0 +1,1377 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Farm Control Dashboard</title>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --secondary: #3498db;
+            --success: #27ae60;
+            --warning: #f39c12;
+            --danger: #e74c3c;
+            --info: #17a2b8;
+            --light: #ecf0f1;
+            --dark: #34495e;
+            --state-on: #2ecc71;
+            --state-off: #95a5a6;
+            --sidebar-width: 250px;
+            --header-height: 70px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: #f5f7fa;
+            color: #333;
+            overflow-x: hidden;
+        }
+
+        /* Lucide SVG specific sizings to match previous font sizes */
+        svg.lucide {
+            width: 1em;
+            height: 1em;
+            vertical-align: middle;
+        }
+
+        .header-left h1 svg {
+            width: 28px;
+            height: 28px;
+            color: var(--primary);
+        }
+
+        .logo svg {
+            width: 24px;
+            height: 24px;
+            color: var(--secondary);
+        }
+
+        .nav-item svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .sensor-icon svg {
+            width: 32px;
+            height: 32px;
+            color: var(--secondary);
+            margin-bottom: 10px;
+        }
+
+        .sensor-item-large .sensor-icon svg {
+            width: 48px;
+            height: 48px;
+            margin-bottom: 15px;
+            stroke-width: 1.5;
+        }
+
+        .btn svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        .notification-icon svg {
+            width: 24px;
+            height: 24px;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: var(--sidebar-width) 1fr;
+            grid-template-rows: var(--header-height) 1fr;
+            grid-template-areas: 
+                "sidebar header"
+                "sidebar main";
+            min-height: 100vh;
+        }
+
+        /* Header Styles */
+        .header {
+            grid-area: header;
+            background: white;
+            color: var(--primary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            z-index: 100;
+        }
+
+        .header-left h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--light);
+            padding: 8px 15px;
+            border-radius: 20px;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .user-profile {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--secondary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+
+        /* Sidebar Styles */
+        .sidebar {
+            grid-area: sidebar;
+            background: var(--primary);
+            color: white;
+            padding: 20px 0;
+            overflow-y: auto;
+            height: 100vh;
+            position: fixed;
+            width: var(--sidebar-width);
+        }
+
+        .logo {
+            padding: 0 20px 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .nav-section {
+            margin-bottom: 25px;
+        }
+
+        .nav-title {
+            padding: 0 20px 10px;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.6);
+            letter-spacing: 1px;
+        }
+
+        .nav-item {
+            padding: 12px 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-left: 4px solid transparent;
+        }
+
+        .nav-item:hover, .nav-item.active {
+            background: rgba(255,255,255,0.1);
+            border-left: 4px solid var(--secondary);
+        }
+
+        .nav-item i {
+            text-align: center;
+        }
+
+        /* Main Content Styles */
+        .main-content {
+            grid-area: main;
+            padding: 25px;
+            overflow-y: auto;
+        }
+
+        .module {
+            display: none;
+            animation: fadeIn 0.5s;
+        }
+
+        .module.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .module-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+        }
+
+        .module-title {
+            font-size: 1.8rem;
+            font-weight: 600;
+            color: var(--primary);
+        }
+
+        .module-actions {
+            display: flex;
+            gap: 15px;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 25px;
+            margin-bottom: 25px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            transition: transform 0.3s, box-shadow 0.3s;
+            border-left: 4px solid var(--secondary);
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--primary);
+        }
+
+        .card-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 0.85rem;
+        }
+
+        .btn-primary {
+            background: var(--secondary);
+            color: white;
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+
+        .btn-warning {
+            background: var(--warning);
+            color: white;
+        }
+
+        .btn-info {
+            background: var(--info);
+            color: white;
+        }
+
+        .btn-light {
+            background: var(--light);
+            color: var(--dark);
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+            transform: translateY(-2px);
+        }
+
+        /* Sensor Grid */
+        .sensor-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .sensor-grid-large {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-top: 15px;
+        }
+
+        .sensor-item {
+            background: var(--light);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            transition: all 0.3s;
+        }
+
+        .sensor-item-large {
+            padding: 25px 15px;
+        }
+
+        .sensor-item:hover {
+            background: #e0e6ea;
+        }
+
+        .sensor-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin: 10px 0;
+            color: var(--primary);
+        }
+
+        .sensor-item-large .sensor-value {
+            font-size: 2.2rem;
+            margin: 15px 0;
+        }
+
+        .sensor-status {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            display: inline-block;
+        }
+
+        .status-normal { background: var(--success); color: white; }
+        .status-warning { background: var(--warning); color: white; }
+        .status-critical { background: var(--danger); color: white; }
+        .status-on { background: var(--state-on); color: white; }
+        .status-off { background: var(--state-off); color: white; }
+
+        /* Equipment Control */
+        .equipment-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .equipment-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            background: var(--light);
+            border-radius: 10px;
+            transition: all 0.3s;
+        }
+
+        .equipment-item:hover {
+            background: #e0e6ea;
+        }
+
+        .equipment-info h4 {
+            margin-bottom: 5px;
+            color: var(--primary);
+        }
+
+        .equipment-info p {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .equipment-status {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: var(--success);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+
+        /* Charts */
+        .chart-container {
+            height: 300px;
+            margin-top: 15px;
+            position: relative;
+        }
+
+        /* Data Tables */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        .data-table th, .data-table td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .data-table th {
+            background: var(--light);
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .data-table tr:hover {
+            background: #f9f9f9;
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--primary);
+        }
+
+        .close-modal {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #999;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: var(--primary);
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 12px 15px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 1rem;
+            transition: border 0.3s;
+        }
+
+        .form-control:focus {
+            border-color: var(--secondary);
+            outline: none;
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+                grid-template-areas: 
+                    "header"
+                    "main";
+            }
+            .sidebar {
+                display: none;
+            }
+        }
+
+        /* Notification System */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            background: white;
+            color: #333;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 1001;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transform: translateX(150%);
+            transition: transform 0.3s;
+            max-width: 400px;
+        }
+
+        .notification.show {
+            transform: translateX(0);
+        }
+
+        .notification.success {
+            border-left: 4px solid var(--success);
+        }
+
+        .notification.warning {
+            border-left: 4px solid var(--warning);
+        }
+
+        .notification.error {
+            border-left: 4px solid var(--danger);
+        }
+
+        .notification.info {
+            border-left: 4px solid var(--info);
+        }
+
+    </style>
+</head>
+
+<body>
+    <div class="dashboard">
+        <header class="header">
+            <div class="header-left">
+                <h1><i data-lucide="bot"></i> Smart Farm Control Center</h1>
+            </div>
+            <div class="header-right">
+                <div class="status-indicator">
+                    <div class="status-dot"></div>
+                    <span>System Online</span>
+                </div>
+            </div>
+        </header>
+
+        <nav class="sidebar">
+            <div class="logo">
+                <i data-lucide="tractor"></i>
+                <h2>Pooh's Smart Farm</h2>
+            </div>
+            
+            <div class="nav-section">
+                <div class="nav-title">Monitoring</div>
+                <div class="nav-item active" data-module="dashboard">
+                    <i data-lucide="gauge"></i> Dashboard
+                </div>
+                <div class="nav-item" data-module="sensors">
+                    <i data-lucide="cpu"></i> Sensor Monitoring
+                </div>
+                <div class="nav-item" data-module="equipment">
+                    <i data-lucide="settings-2"></i> Equipment Control
+                </div>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-title">Maintenance</div>
+                <div class="nav-item" data-module="maintenance">
+                    <i data-lucide="wrench"></i> Maintenance Schedule
+                </div>
+                <div class="nav-item" data-module="reports">
+                    <i data-lucide="file-text"></i> Reports
+                </div>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-title">System</div>
+                <div class="nav-item" data-module="settings">
+                    <i data-lucide="settings"></i> System Settings
+                </div>
+                <div class="nav-item" data-module="users">
+                    <i data-lucide="users"></i> log in
+                </div>
+            </div>
+        </nav>
+
+        <main class="main-content">
+            <div class="module active" id="dashboard">
+                <div class="module-header">
+                    <h2 class="module-title">Dashboard Overview</h2>
+                    <div class="module-actions">
+                        <button class="btn btn-primary" onclick="startSystem()">
+                            <i data-lucide="play"></i> Start All
+                        </button>
+                        <button class="btn btn-danger" onclick="emergencyStop()">
+                            <i data-lucide="square"></i> Emergency Stop
+                        </button>
+                    </div>
+                </div>
+
+                <div style="padding: 40px; text-align: center; color: #888; background: white; border-radius: 12px; border: 1px dashed #ccc;">
+                    <i data-lucide="layout-grid" style="width: 48px; height: 48px; margin-bottom: 15px; color: #ccc;"></i>
+                    <p style="font-size: 1.1rem;">Dashboard content has been cleared to focus purely on Sensor Monitoring and Equipment Control.</p>
+                    <p style="font-size: 0.9rem; margin-top: 10px;">Please select 'Sensor Monitoring' or 'Equipment Control' from the sidebar.</p>
+                </div>
+            </div>
+
+            <div class="module" id="sensors">
+                <div class="module-header">
+                    <h2 class="module-title">Sensor Monitoring</h2>
+                    <div class="module-actions">
+                        <button class="btn btn-info" onclick="loadSensorConfig()">
+                            <i data-lucide="folder-open"></i> Load Configures
+                        </button>
+                        <button class="btn btn-primary" onclick="showSensorConfig()">
+                            <i data-lucide="sliders-horizontal"></i> Configure Sensors
+                        </button>
+                    </div>
+                </div>
+
+                <div class="dashboard-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">Smart Farm Monitoring Sensors</h3>
+                        </div>
+
+                        <div class="sensor-grid-large">
+                            <div class="sensor-item sensor-item-large">
+                                <div class="sensor-icon"><i data-lucide="thermometer"></i></div>
+                                <div style="font-size: 1.1rem; font-weight: 600;">Temperature</div>
+                                <div class="sensor-value">23.5°C</div>
+                                <span class="sensor-status status-normal">Normal</span>
+                            </div>
+
+                            <div class="sensor-item sensor-item-large">
+                                <div class="sensor-icon"><i data-lucide="droplets"></i></div>
+                                <div style="font-size: 1.1rem; font-weight: 600;">Humidity</div>
+                                <div class="sensor-value">65%</div>
+                                <span class="sensor-status status-normal">Optimal</span>
+                            </div>
+
+                            <div class="sensor-item sensor-item-large">
+                                <div class="sensor-icon"><i data-lucide="lightbulb"></i></div>
+                                <div style="font-size: 1.1rem; font-weight: 600;">Light Intensity</div>
+                                <div class="sensor-value">200µmol/m²s</div>
+                                <span class="sensor-status status-normal">Normal</span>
+                            </div>
+                        </div>
+
+                        <hr style="border: 0; border-top: 1px solid var(--light); margin: 25px 0 10px 0;">
+
+                        <div class="sensor-grid">
+                            <div class="sensor-item">
+                                <div class="sensor-icon"><i data-lucide="cloud"></i></div>
+                                <div>Carbon Dioxide</div>
+                                <div class="sensor-value">500ppm</div>
+                                <span class="sensor-status status-normal">Optimal</span>
+                            </div>
+
+                            <div class="sensor-item">
+                                <div class="sensor-icon"><i data-lucide="flask-conical"></i></div>
+                                <div>Hydrogen Ion Concentration</div>
+                                <div class="sensor-value">6.5</div>
+                                <span class="sensor-status status-normal">Optimal</span>
+                            </div>
+                            
+                            <div class="sensor-item">
+                                <div class="sensor-icon"><i data-lucide="zap"></i></div>
+                                <div>Electrical Conductivity</div>
+                                <div class="sensor-value">1.2dS/m</div>
+                                <span class="sensor-status status-normal">Optimal</span>
+                            </div>
+                            
+                            <div class="sensor-item">
+                                <div class="sensor-icon"><i data-lucide="waves"></i></div>
+                                <div>Dissolved Oxygen</div>
+                                <div class="sensor-value">7mg/L</div>
+                                <span class="sensor-status status-normal">Optimal</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Sensor Data History</h3>
+                    </div>
+</div>
+            </div>
+
+            <div class="module" id="equipment">
+                <div class="module-header">
+                    <h2 class="module-title">Equipment Control</h2>
+                    <div class="module-actions">
+                        <button class="btn btn-primary" onclick="startAllEquipment()">
+                            <i data-lucide="play"></i> Start All
+                        </button>
+                        <button class="btn btn-danger" onclick="stopAllEquipment()">
+                            <i data-lucide="square"></i> Stop All
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Climate Control (Aerial Environment)</h3>
+                    </div>
+                    <div class="equipment-list">
+                        <div class="equipment-item">
+                            <div class="equipment-info">
+                                <h4>Circulation Fan</h4>
+                                <p> Power: ON / OFF | Speed (RPM): 0~100% </p>
+                                <p> 내부 공기 순환, 온도 하강 및 수분 부족분(VPD) 조절</p>
+                            </div>
+                            <div class="equipment-status">
+                                <span class="sensor-status status-on">On</span>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" checked onchange="toggleEquipment(this, 'Circulation Fan')">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="equipment-item">
+                            <div class="equipment-info">
+                                <h4>Grow Light</h4>
+                                <p>Power: ON / OFF | Dimming: 0 ~ 100%</p>
+                                <p>광합성에 필요한 유효 광량(PPFD) 공급</p>
+                            </div>
+                            <div class="equipment-status">
+                                <span class="sensor-status status-on">On</span>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" checked onchange="toggleEquipment(this, 'Grow Light')">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="equipment-item">
+                            <div class="equipment-info">
+                                <h4>HVAC</h4>
+                                <p>Power: ON / OFF | Target Temp(°C)</p>
+                                <p>목표 온도(DIF) 유지를 위한 강력한 온도 제어</p>
+                            </div>
+                            <div class="equipment-status">
+                                <span class="sensor-status status-off">Off</span>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" onchange="toggleEquipment(this, 'HVAC')">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="equipment-item">
+                            <div class="equipment-info">
+                                <h4>Humidifier</h4>
+                                <p>Power: ON / OFF | Target Hum(%)</p>
+                                <p>적정 상대습도(RH) 유지 및 곰팡이병 방지</p>
+                            </div>
+                            <div class="equipment-status">
+                                <span class="sensor-status status-on">On</span>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" checked onchange="toggleEquipment(this, 'Humidifier')">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="equipment-item">
+                            <div class="equipment-info">
+                                <h4>CO2 Generator</h4>
+                                <p>Valve State: Open / Close | Target CO2(ppm) </p>
+                                <p>광합성 촉진을 위한 탄산가스 시비</p>
+                            </div>
+                            <div class="equipment-status">
+                                <span class="sensor-status status-off">Off</span>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" onchange="toggleEquipment(this, 'CO2 Generator')">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Nutrient System (Root Zone Management)</h3>
+                    </div>
+                    <div class="equipment-list">
+                        <div class="equipment-item">
+                            <div class="equipment-info">
+                                <h4>Water Pump</h4>
+                                <p>Power: ON / OFF |  Duty Cycle: Running(Sec) / Stopped(Sec)</p>
+                                <p>NFT/DFT 배드로 양액을 순환시켜 뿌리에 수분/양분 공급</p>
+                            </div>
+                            <div class="equipment-status">
+                                <span class="sensor-status status-off">Off</span>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" onchange="toggleEquipment(this, 'Water Pump')">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="equipment-item">
+                            <div class="equipment-info">
+                                <h4>Solenoid Valve</h4>
+                                <p>Valve State: Open / Close</p>
+                                <p>특정 구역(Zone)으로 가는 관수 라인 개폐</p>
+                            </div>
+                            <div class="equipment-status">
+                                <span class="sensor-status status-off">Off</span>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" onchange="toggleEquipment(this, 'Solenoid Valve')">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="equipment-item">
+                            <div class="equipment-info">
+                                <h4>Dosing Pump</h4>
+                                <p>Injection(mL) | Pulse</p>
+                                <p>A액, B액, 산, 알칼리를 튜브로 미세 주입하여 EC/pH 맞춤</p>
+                            </div>
+                            <div class="equipment-status">
+                                <span class="sensor-status status-off">Off</span>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" onchange="toggleEquipment(this, 'Dosing Pump')">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="equipment-item">
+                            <div class="equipment-info">
+                                <h4>Air Pump</h4>
+                                <p>Power: ON / OFF</p>
+                                <p>양액 탱크 내 용존 산소(DO) 농도 증가</p>
+                            </div>
+                            <div class="equipment-status">
+                                <span class="sensor-status status-on">On</span>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" onchange="toggleEquipment(this, 'Air Pump')">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <div class="modal" id="configModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Sensor Configuration</h3>
+                <button class="close-modal" onclick="closeModal()">×</button>
+            </div>
+            <div class="form-group">
+                <label>Select Sensor Type</label>
+                <select class="form-control" id="sensorType" onchange="updateSensorUnits()">
+                    <option value="Temperature">Temperature</option>
+                    <option value="Light Intensity">Light Intensity</option>
+                    <option value="Humidity">Humidity</option>
+                    <option value="Hydrogen Ion Concentration">Hydrogen Ion Concentration</option>
+                    <option value="Electrical Conductivity">Electrical Conductivity</option>
+                    <option value="Dissolved Oxygen">Dissolved Oxygen</option>
+                    <option value="Carbon Dioxide">Carbon Dioxide</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Sensor Sampling Rate</label>
+                <select class="form-control" id="samplingRate">
+                    <option value="10">10 seconds</option>
+                    <option value="30">30 seconds</option>
+                    <option value="60">1 minute</option>
+                    <option value="300">5 minutes</option>
+                    <option value="600">10 minutes</option>
+                    <option value="1800">30 minutes</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Lower Threshold Limit <span id="lowerUnitLabel">(°C)</span></label>
+                <input type="number" class="form-control" id="lowerThreshold" placeholder="Enter lower limit" step="0.1">
+            </div>
+            <div class="form-group">
+                <label>Upper Threshold Limit <span id="upperUnitLabel">(°C)</span></label>
+                <input type="number" class="form-control" id="upperThreshold" placeholder="Enter upper limit" step="0.1">
+            </div>
+            <button class="btn btn-primary" id="reviewBtn" style="width: 100%; margin-top: 20px;" onclick="reviewConfiguration()">
+                <i data-lucide="check-circle"></i> Review Configuration
+            </button>
+            <div id="confirmationSection" style="display: none; margin-top: 20px; padding: 15px; background: var(--light); border-radius: 8px; border: 1px solid #ddd;">
+                <h4 style="margin-bottom: 15px; color: var(--primary);">Confirm Settings</h4>
+                <p style="margin-bottom: 5px;"><strong>Sensor:</strong> <span id="confSensor"></span></p>
+                <p style="margin-bottom: 5px;"><strong>Sampling Rate:</strong> <span id="confRate"></span></p>
+                <p style="margin-bottom: 5px;"><strong>Lower Limit:</strong> <span id="confLower"></span> <span class="confUnit"></span></p>
+                <p style="margin-bottom: 15px;"><strong>Upper Limit:</strong> <span id="confUpper"></span> <span class="confUnit"></span></p>
+                
+                <p style="margin-bottom: 15px; font-weight: bold; color: var(--danger);">Are these settings correct?</p>
+                
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn btn-success" style="flex: 1;" onclick="saveConfigConfirmed()">Yes, Save</button>
+                    <button class="btn btn-warning" style="flex: 1;" onclick="editConfiguration()">No, Edit</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="loadConfigModal">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h3 class="modal-title">Saved Sensor Configurations</h3>
+                <button class="close-modal" onclick="closeLoadModal()">×</button>
+            </div>
+            <div style="overflow-x: auto;">
+                <table class="data-table" id="loadedConfigTable">
+                    <thead>
+                        <tr>
+                            <th>Sensor Type</th>
+                            <th>Sampling Rate (s)</th>
+                            <th>Lower Limit</th>
+                            <th>Upper Limit</th>
+                            <th>Last Updated</th>
+                        </tr>
+                    </thead>
+                    <tbody id="loadedConfigBody">
+                    </tbody>
+                </table>
+            </div>
+            <button class="btn btn-light" style="width: 100%; margin-top: 20px; text-align: center; justify-content: center;" onclick="closeLoadModal()">
+                Close
+            </button>
+        </div>
+    </div>
+
+    <div id="notificationContainer"></div>
+
+    <script>
+        // Initialize the dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeCharts();
+            startLiveDataUpdates();
+            setupNavigation();
+            // Render Lucide Icons
+            lucide.createIcons();
+        });
+
+        // Navigation setup
+        function setupNavigation() {
+            const navItems = document.querySelectorAll('.nav-item');
+            navItems.forEach(item => {
+                item.addEventListener('click', function() {
+                    navItems.forEach(nav => nav.classList.remove('active'));
+                    this.classList.add('active');
+                    const moduleId = this.getAttribute('data-module');
+                    switchModule(moduleId);
+                });
+            });
+        }
+
+        // Switch between modules
+        function switchModule(moduleId) {
+            const modules = document.querySelectorAll('.module');
+            modules.forEach(module => module.classList.remove('active'));
+            const targetModule = document.getElementById(moduleId);
+            if (targetModule) {
+                targetModule.classList.add('active');
+            }
+        }
+
+        // Chart initialization
+        function initializeCharts() {
+            const sensorHistoryCtx = document.getElementById('sensorHistoryChart');
+            if (sensorHistoryCtx) {
+                new Chart(sensorHistoryCtx.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: ['Day 1', 'Day 2', 'Day 3', 'Day 5', 'Day 6', 'Day 7', 'Day 8'],
+                        datasets: [{
+                            label: 'humidity (RH)',
+                            data: [53, 68, 61, 72, 79, 75, 67],
+                            backgroundColor: '#3498db'
+                        }, {
+                            label: 'Temperature (°C)',
+                            data: [28, 25, 31, 23, 22, 26, 24],
+                            backgroundColor: '#e74c3c'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        // Simulate live data updates
+        function startLiveDataUpdates() {
+            setInterval(() => {
+                updateSensorReadings();
+            }, 5000);
+        }
+
+        function updateSensorReadings() {
+            const sensors = document.querySelectorAll('.sensor-value');
+            sensors.forEach(sensor => {
+                const currentText = sensor.textContent;
+                let currentValue;
+                
+                if (currentText.includes('°C')) {
+                    currentValue = parseFloat(currentText);
+                    const variation = (Math.random() - 0.5) * 0.5;
+                    const newValue = Math.max(20, Math.min(30, currentValue + variation));
+                    sensor.textContent = newValue.toFixed(1) + '°C';
+                } else if (currentText.includes('m/s²')) {
+                    currentValue = parseFloat(currentText);
+                    const variation = (Math.random() - 0.5) * 0.3;
+                    const newValue = Math.max(0.5, Math.min(4, currentValue + variation));
+                    sensor.textContent = newValue.toFixed(1) + ' m/s²';
+                } else if (currentText.includes('%')) {
+                    currentValue = parseFloat(currentText);
+                    const variation = (Math.random() - 0.5) * 5;
+                    const newValue = Math.max(0, Math.min(100, currentValue + variation));
+                    sensor.textContent = newValue.toFixed(0) + '%';
+                }
+            });
+        }
+
+        // Control functions
+        function startSystem() {
+            showNotification('Starting all systems...', 'success');
+        }
+
+        function emergencyStop() {
+            if (confirm('Are you sure you want to execute emergency stop? This will halt all operations.')) {
+                showNotification('Emergency stop activated! All systems halted.', 'error');
+            }
+        }
+
+        function startAllEquipment() {
+            const checkboxes = document.querySelectorAll('#equipment .equipment-list input[type="checkbox"]');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = true;
+                const statusSpan = checkbox.closest('.equipment-status').querySelector('.sensor-status');
+                if (statusSpan) {
+                    statusSpan.textContent = 'On';
+                    statusSpan.className = 'sensor-status status-on';
+                }
+            });
+            showNotification('Starting all equipment...', 'success');
+        }
+
+        function stopAllEquipment() {
+            const checkboxes = document.querySelectorAll('#equipment .equipment-list input[type="checkbox"]');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = false;
+                const statusSpan = checkbox.closest('.equipment-status').querySelector('.sensor-status');
+                if (statusSpan) {
+                    statusSpan.textContent = 'Off';
+                    statusSpan.className = 'sensor-status status-off';
+                }
+            });
+            showNotification('Stopping all equipment...', 'warning');
+        }
+
+        function toggleEquipment(checkbox, equipmentId) {
+            const status = checkbox.checked ? 'activated' : 'deactivated';
+            showNotification(`${equipmentId} ${status}`, 'success');
+            
+            const statusSpan = checkbox.closest('.equipment-status').querySelector('.sensor-status');
+            if (statusSpan) {
+                if (checkbox.checked) {
+                    statusSpan.textContent = 'On';
+                    statusSpan.className = 'sensor-status status-on';
+                } else {
+                    statusSpan.textContent = 'Off';
+                    statusSpan.className = 'sensor-status status-off';
+                }
+            }
+        }
+
+        // Modal Functions
+        function showSensorConfig() {
+            document.getElementById('configModal').style.display = 'flex';
+            editConfiguration(); 
+        }
+
+        function closeModal() {
+            document.getElementById('configModal').style.display = 'none';
+        }
+
+        function updateSensorUnits() {
+            const sensor = document.getElementById('sensorType').value;
+            let unit = '';
+            
+            switch(sensor) {
+                case 'Temperature': unit = '(°C)'; break;
+                case 'Light Intensity': unit = '(µmol/m²s)'; break;
+                case 'Humidity': unit = '(%)'; break;
+                case 'Hydrogen Ion Concentration': unit = '(pH)'; break;
+                case 'Electrical Conductivity': unit = '(dS/m)'; break;
+                case 'Dissolved Oxygen': unit = '(mg/L)'; break;
+                case 'Carbon Dioxide': unit = '(ppm)'; break;
+            }
+            
+            document.getElementById('lowerUnitLabel').textContent = unit;
+            document.getElementById('upperUnitLabel').textContent = unit;
+            
+            const confUnits = document.querySelectorAll('.confUnit');
+            confUnits.forEach(el => el.textContent = unit);
+        }
+
+        function reviewConfiguration() {
+            const lower = document.getElementById('lowerThreshold').value;
+            const upper = document.getElementById('upperThreshold').value;
+            
+            if(lower === '' || upper === '') {
+                showNotification('Please enter both lower and upper thresholds.', 'warning');
+                return;
+            }
+
+            if(parseFloat(lower) >= parseFloat(upper)) {
+                showNotification('Lower threshold must be less than upper threshold.', 'error');
+                return;
+            }
+
+            const sensor = document.getElementById('sensorType').value;
+            const rateSelect = document.getElementById('samplingRate');
+            const rateText = rateSelect.options[rateSelect.selectedIndex].text;
+
+            document.getElementById('confSensor').textContent = sensor;
+            document.getElementById('confRate').textContent = rateText;
+            document.getElementById('confLower').textContent = lower;
+            document.getElementById('confUpper').textContent = upper;
+            
+            updateSensorUnits(); 
+
+            document.getElementById('reviewBtn').style.display = 'none';
+            document.getElementById('confirmationSection').style.display = 'block';
+        }
+
+        function editConfiguration() {
+            document.getElementById('confirmationSection').style.display = 'none';
+            document.getElementById('reviewBtn').style.display = 'block';
+        }
+
+        function saveConfigConfirmed() {
+            const sensorType = document.getElementById('sensorType').value;
+            const samplingRate = document.getElementById('samplingRate').value;
+            const lowerThreshold = document.getElementById('lowerThreshold').value;
+            const upperThreshold = document.getElementById('upperThreshold').value;
+
+            const configData = {
+                samplingRate: samplingRate,
+                lowerThreshold: parseFloat(lowerThreshold),
+                upperThreshold: parseFloat(upperThreshold),
+                lastUpdated: new Date().toISOString()
+            };
+            
+            localStorage.setItem(`sf_sensor_config_${sensorType.replace(/\s+/g, '_')}`, JSON.stringify(configData));
+
+            showNotification(`${sensorType} configuration saved successfully!`, 'success');
+            
+            document.getElementById('lowerThreshold').value = '';
+            document.getElementById('upperThreshold').value = '';
+            editConfiguration();
+            closeModal();
+        }
+
+        function loadSensorConfig() {
+            const sensors = [
+                "Temperature",
+                "Light Intensity",
+                "Humidity",
+                "Hydrogen Ion Concentration",
+                "Electrical Conductivity",
+                "Dissolved Oxygen",
+                "Carbon Dioxide"
+            ];
+            
+            const tbody = document.getElementById('loadedConfigBody');
+            tbody.innerHTML = ''; 
+
+            sensors.forEach(sensor => {
+                const key = `sf_sensor_config_${sensor.replace(/\s+/g, '_')}`;
+                const savedData = localStorage.getItem(key);
+                
+                let tr = document.createElement('tr');
+                
+                if (savedData) {
+                    const data = JSON.parse(savedData);
+                    const dateObj = new Date(data.lastUpdated);
+                    const formattedDate = dateObj.toLocaleString();
+                    
+                    tr.innerHTML = `
+                        <td><strong>${sensor}</strong></td>
+                        <td>${data.samplingRate}</td>
+                        <td>${data.lowerThreshold}</td>
+                        <td>${data.upperThreshold}</td>
+                        <td>${formattedDate}</td>
+                    `;
+                } else {
+                    tr.innerHTML = `
+                        <td><strong>${sensor}</strong></td>
+                        <td style="color: #999;">N/A</td>
+                        <td style="color: #999;">N/A</td>
+                        <td style="color: #999;">N/A</td>
+                        <td style="color: #999;">N/A</td>
+                    `;
+                }
+                tbody.appendChild(tr);
+            });
+
+            document.getElementById('loadConfigModal').style.display = 'flex';
+        }
+
+        function closeLoadModal() {
+            document.getElementById('loadConfigModal').style.display = 'none';
+        }
+
+        // Notification system
+        function showNotification(message, type) {
+            const container = document.getElementById('notificationContainer');
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            
+            let icon = 'info';
+            if (type === 'success') icon = 'check-circle';
+            if (type === 'warning') icon = 'alert-triangle';
+            if (type === 'error') icon = 'x-circle';
+            
+            notification.innerHTML = `
+                <div class="notification-icon"><i data-lucide="${icon}"></i></div>
+                <div>${message}</div>
+            `;
+            
+            container.appendChild(notification);
+            
+            // Re-initialize icons inside the new notification
+            lucide.createIcons({
+                root: notification
+            });
+            
+            setTimeout(() => {
+                notification.classList.add('show');
+            }, 100);
+            
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                }, 300);
+            }, 5000);
+        }
+    </script>
+</body>
+</html>
