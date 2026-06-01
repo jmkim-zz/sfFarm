@@ -7,6 +7,7 @@
     <title>Smart Farm Control Dashboard</title>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css">
     <style>
         :root {
             --primary: #2c3e50;
@@ -67,11 +68,24 @@
             margin-bottom: 10px;
         }
 
+        .sensor-icon .mdi {
+            font-size: 32px;
+            color: var(--secondary);
+            margin-bottom: 10px;
+            display: inline-block;
+            line-height: 1;
+        }
+
         .sensor-item-large .sensor-icon svg {
             width: 48px;
             height: 48px;
             margin-bottom: 15px;
             stroke-width: 1.5;
+        }
+
+        .sensor-item-large .sensor-icon .mdi {
+            font-size: 48px;
+            margin-bottom: 15px;
         }
 
         .btn svg {
@@ -426,6 +440,14 @@
         .equipment-info h4 {
             margin-bottom: 5px;
             color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .equipment-info h4 .mdi {
+            color: var(--secondary);
+            font-size: 1.2rem;
         }
 
         .equipment-info p {
@@ -735,21 +757,21 @@
 
                         <div class="sensor-grid-large">
                             <div class="sensor-item sensor-item-large">
-                                <div class="sensor-icon"><i data-lucide="thermometer"></i></div>
+                                <div class="sensor-icon"><i class="mdi mdi-thermometer"></i></div>
                                 <div style="font-size: 1.1rem; font-weight: 600;">Temperature</div>
                                 <div class="sensor-value">23.5°C</div>
                                 <span class="sensor-status status-normal">Normal</span>
                             </div>
 
                             <div class="sensor-item sensor-item-large">
-                                <div class="sensor-icon"><i data-lucide="droplets"></i></div>
+                                <div class="sensor-icon"><i class="mdi mdi-water-percent"></i></div>
                                 <div style="font-size: 1.1rem; font-weight: 600;">Humidity</div>
                                 <div class="sensor-value">65%</div>
                                 <span class="sensor-status status-normal">Optimal</span>
                             </div>
 
                             <div class="sensor-item sensor-item-large">
-                                <div class="sensor-icon"><i data-lucide="lightbulb"></i></div>
+                                <div class="sensor-icon"><i class="mdi mdi-white-balance-sunny"></i></div>
                                 <div style="font-size: 1.1rem; font-weight: 600;">Light Intensity</div>
                                 <div class="sensor-value">200µmol/m²s</div>
                                 <span class="sensor-status status-normal">Normal</span>
@@ -760,28 +782,28 @@
 
                         <div class="sensor-grid">
                             <div class="sensor-item">
-                                <div class="sensor-icon"><i data-lucide="cloud"></i></div>
+                                <div class="sensor-icon"><i class="mdi mdi-molecule-co2"></i></div>
                                 <div>Carbon Dioxide</div>
                                 <div class="sensor-value">500ppm</div>
                                 <span class="sensor-status status-normal">Optimal</span>
                             </div>
 
                             <div class="sensor-item">
-                                <div class="sensor-icon"><i data-lucide="flask-conical"></i></div>
+                                <div class="sensor-icon"><i class="mdi mdi-flask"></i></div>
                                 <div>Hydrogen Ion Concentration</div>
                                 <div class="sensor-value">6.5</div>
                                 <span class="sensor-status status-normal">Optimal</span>
                             </div>
                             
                             <div class="sensor-item">
-                                <div class="sensor-icon"><i data-lucide="zap"></i></div>
+                                <div class="sensor-icon"><i class="mdi mdi-lightning-bolt"></i></div>
                                 <div>Electrical Conductivity</div>
                                 <div class="sensor-value">1.2dS/m</div>
                                 <span class="sensor-status status-normal">Optimal</span>
                             </div>
                             
                             <div class="sensor-item">
-                                <div class="sensor-icon"><i data-lucide="waves"></i></div>
+                                <div class="sensor-icon"><i class="mdi mdi-chart-bubble"></i></div>
                                 <div>Dissolved Oxygen</div>
                                 <div class="sensor-value">7mg/L</div>
                                 <span class="sensor-status status-normal">Optimal</span>
@@ -816,7 +838,7 @@
                     <div class="equipment-list">
                         <div class="equipment-item">
                             <div class="equipment-info">
-                                <h4>Circulation Fan</h4>
+                                <h4>Circulation Fan <i class="mdi mdi-fan"></i></h4>
                                 <p> Power: ON / OFF | Speed (RPM): 0~100% </p>
                                 <p> 내부 공기 순환, 온도 하강 및 수분 부족분(VPD) 조절</p>
                             </div>
@@ -831,7 +853,7 @@
 
                         <div class="equipment-item">
                             <div class="equipment-info">
-                                <h4>Grow Light</h4>
+                                <h4>Grow Light <i class="mdi mdi-lightbulb-on"></i></h4>
                                 <p>Power: ON / OFF | Dimming: 0 ~ 100%</p>
                                 <p>광합성에 필요한 유효 광량(PPFD) 공급</p>
                             </div>
@@ -846,7 +868,7 @@
 
                         <div class="equipment-item">
                             <div class="equipment-info">
-                                <h4>HVAC</h4>
+                                <h4>HVAC <i class="mdi mdi-air-conditioner"></i></h4>
                                 <p>Power: ON / OFF | Target Temp(°C)</p>
                                 <p>목표 온도(DIF) 유지를 위한 강력한 온도 제어</p>
                             </div>
@@ -861,7 +883,7 @@
 
                         <div class="equipment-item">
                             <div class="equipment-info">
-                                <h4>Humidifier</h4>
+                                <h4>Humidifier <i class="mdi mdi-air-humidifier"></i></h4>
                                 <p>Power: ON / OFF | Target Hum(%)</p>
                                 <p>적정 상대습도(RH) 유지 및 곰팡이병 방지</p>
                             </div>
@@ -876,7 +898,7 @@
 
                         <div class="equipment-item">
                             <div class="equipment-info">
-                                <h4>CO2 Generator</h4>
+                                <h4>CO2 Generator <i class="mdi mdi-gas-cylinder"></i></h4>
                                 <p>Valve State: Open / Close | Target CO2(ppm) </p>
                                 <p>광합성 촉진을 위한 탄산가스 시비</p>
                             </div>
@@ -898,7 +920,7 @@
                     <div class="equipment-list">
                         <div class="equipment-item">
                             <div class="equipment-info">
-                                <h4>Water Pump</h4>
+                                <h4>Water Pump <i class="mdi mdi-water-pump"></i></h4>
                                 <p>Power: ON / OFF |  Duty Cycle: Running(Sec) / Stopped(Sec)</p>
                                 <p>NFT/DFT 배드로 양액을 순환시켜 뿌리에 수분/양분 공급</p>
                             </div>
@@ -913,7 +935,7 @@
 
                         <div class="equipment-item">
                             <div class="equipment-info">
-                                <h4>Solenoid Valve</h4>
+                                <h4>Solenoid Valve <i class="mdi mdi-pipe-valve"></i></h4>
                                 <p>Valve State: Open / Close</p>
                                 <p>특정 구역(Zone)으로 가는 관수 라인 개폐</p>
                             </div>
@@ -928,7 +950,7 @@
                         
                         <div class="equipment-item">
                             <div class="equipment-info">
-                                <h4>Dosing Pump</h4>
+                                <h4>Dosing Pump <i class="mdi mdi-eyedropper"></i></h4>
                                 <p>Injection(mL) | Pulse</p>
                                 <p>A액, B액, 산, 알칼리를 튜브로 미세 주입하여 EC/pH 맞춤</p>
                             </div>
@@ -943,7 +965,7 @@
                         
                         <div class="equipment-item">
                             <div class="equipment-info">
-                                <h4>Air Pump</h4>
+                                <h4>Air Pump <i class="mdi mdi-weather-windy"></i></h4>
                                 <p>Power: ON / OFF</p>
                                 <p>양액 탱크 내 용존 산소(DO) 농도 증가</p>
                             </div>
