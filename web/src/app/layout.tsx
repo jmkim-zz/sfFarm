@@ -1,18 +1,18 @@
-import '../styles/globals.css';
-import type { Metadata } from 'next';
+import type { Metadata } from "next";
+import "./globals.css"; // 💡 이 부분이 핵심입니다! Tailwind CSS를 불러옵니다.
 
 export const metadata: Metadata = {
-  title: '스마트팜 대시보드 (SmartFarm Dashboard)',
-  description: 'MQTT 및 Supabase 기반 실시간 IoT 관제 시스템',
+  title: "Smart Farm Control Center",
+  description: "Dashboard for Smart Farm",
 };
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   return (
-    <html lang="ko">
+    <html lang="en">
       <body>{children}</body>
     </html>
   );
