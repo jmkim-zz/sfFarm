@@ -4,10 +4,20 @@ import React from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Tractor, Gauge, Cpu, Settings2, Wrench, FileText, Settings, Users } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
 
 export default function Sidebar() {
   const searchParams = useSearchParams();
   const currentTab = searchParams.get('tab') || 'dashboard';
+  const [session, setSession] = React.useState<any>(null);
+
+  React.useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   const navSections = [
     {
@@ -29,7 +39,7 @@ export default function Sidebar() {
       title: 'System',
       items: [
         { id: 'settings', label: 'System Settings', icon: Settings },
-        { id: 'users', label: 'Log in', icon: Users },
+        { id: 'users', label: session ? 'Profile' : 'Log in', icon: Users },
       ]
     }
   ];
