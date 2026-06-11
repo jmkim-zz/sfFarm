@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import Sidebar from './Sidebar';
 import Header from './Header';
 
@@ -9,7 +9,9 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       <style dangerouslySetInnerHTML={{ __html: `@import url('https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css');` }} />
 
       {/* Sidebar fixed to the left */}
-      <Sidebar />
+      <Suspense fallback={<div className="bg-primary h-screen fixed w-[250px]"></div>}>
+        <Sidebar />
+      </Suspense>
       
       {/* Main Content wrapper pushed to the right by sidebar width (250px) */}
       <div className="flex-1 flex flex-col ml-[250px]">
