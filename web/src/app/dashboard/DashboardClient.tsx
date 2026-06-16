@@ -629,8 +629,11 @@ export default function DashboardClient() {
       defines.push(`\nWiFiSSLClient espClient;`);
       defines.push(`PubSubClient client(espClient);\n`);
 
+      globalVars.push(`unsigned long lastWifiReconnectAttempt = 0;`);
+      globalVars.push(`unsigned long lastMqttReconnectAttempt = 0;`);
+
       customFunctions.push(`void setupWiFi() {\n  Serial.print("[WiFi] Connecting to ");\n  Serial.println(ssid);\n  WiFi.begin(ssid, password);\n  while (WiFi.status() != WL_CONNECTED) {\n    delay(500);\n    Serial.print(".");\n  }\n  Serial.print("\\n[WiFi] Connected. IP: ");\n  Serial.println(WiFi.localIP());\n}`);
-      customFunctions.push(`void checkNetworkAndMQTT() {\n  if (WiFi.status() != WL_CONNECTED) {\n    Serial.println("[WiFi] Connection lost. Reconnecting...");\n    WiFi.disconnect();\n    setupWiFi();\n  }\n  while (!client.connected()) {\n    Serial.print("[MQTT] Attempting connection...");\n    String clientId = "ArduinoClient-" + String(random(0xffff), HEX);\n    if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass)) {\n      Serial.println("connected!");\n    } else {\n      Serial.print("failed, rc=");\n      Serial.print(client.state());\n      Serial.println(" try again in 5 seconds");\n      delay(5000);\n    }\n  }\n}`);
+      customFunctions.push(`void checkNetworkAndMQTT() {\n  unsigned long now = millis();\n  if (WiFi.status() != WL_CONNECTED) {\n    if (now - lastWifiReconnectAttempt > 10000 || lastWifiReconnectAttempt == 0) {\n      lastWifiReconnectAttempt = now;\n      Serial.println("[WiFi] Connection lost. Reconnecting...");\n      WiFi.disconnect();\n      WiFi.begin(ssid, password);\n    }\n    return;\n  }\n  lastWifiReconnectAttempt = 0;\n  if (!client.connected()) {\n    if (now - lastMqttReconnectAttempt > 5000 || lastMqttReconnectAttempt == 0) {\n      lastMqttReconnectAttempt = now;\n      Serial.print("[MQTT] Attempting connection...");\n      String clientId = "ArduinoClient-" + String(random(0xffff), HEX);\n      if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass)) {\n        Serial.println("connected!");\n        lastMqttReconnectAttempt = 0;\n      } else {\n        Serial.print("failed, rc=");\n        Serial.print(client.state());\n        Serial.println(" try again in 5 seconds");\n      }\n    }\n  }\n}`);
       
       setups.push(`  setupWiFi();`);
       setups.push(`  client.setServer(mqtt_server, mqtt_port);`);
@@ -741,6 +744,8 @@ export default function DashboardClient() {
               let simCode = isFloat ? `float val = random(${min * 10}, ${max * 10}) / 10.0;` : `int val = random(${min}, ${max});`;
               
               let realReadCode = `// TODO: Add real sensor read logic from ${device} here\n      doc["${keyName}"] = 0;`;
+              let checkDataReadyCode = "";
+
               if (sensorVarName) {
                 if (devLower.includes('dht') || devLower.includes('bme280') || devLower.includes('sht31')) {
                   if (mapping === 'Temperature') {
@@ -749,14 +754,16 @@ export default function DashboardClient() {
                     realReadCode = `doc["${keyName}"] = ${sensorVarName}.readHumidity();`;
                   }
                 } else if (devLower.includes('scd4')) {
-                  realReadCode = `uint16_t co2; float temp, hum;\n      ${sensorVarName}.readMeasurement(co2, temp, hum);\n`;
+                  checkDataReadyCode = `bool isDataReady = false;\n      ${sensorVarName}.getDataReadyFlag(isDataReady);\n      if (!isDataReady) shouldPublish = false;`;
+                  realReadCode = `if (shouldPublish) {\n        uint16_t co2 = 0; float temp = 0.0, hum = 0.0;\n        ${sensorVarName}.readMeasurement(co2, temp, hum);\n`;
                   if (mapping === 'Carbon Dioxide') {
-                    realReadCode += `      doc["${keyName}"] = co2;`;
+                    realReadCode += `        doc["${keyName}"] = co2;`;
                   } else if (mapping === 'Temperature') {
-                    realReadCode += `      doc["${keyName}"] = temp;`;
+                    realReadCode += `        doc["${keyName}"] = temp;`;
                   } else {
-                    realReadCode += `      doc["${keyName}"] = hum;`;
+                    realReadCode += `        doc["${keyName}"] = hum;`;
                   }
+                  realReadCode += `\n      }`;
                 } else if (devLower.includes('tsl2591')) {
                   realReadCode = `uint32_t lum = ${sensorVarName}.getFullLuminosity();\n      doc["${keyName}"] = ${sensorVarName}.calculateLux(lum & 0xFFFF, lum >> 16);`;
                 }
@@ -767,24 +774,30 @@ export default function DashboardClient() {
 
               loops.push(`  if (millis() - last_${safeName}${topicSuffix} >= interval_${safeName}${topicSuffix}) {`);
               loops.push(`    last_${safeName}${topicSuffix} = millis();`);
-              loops.push(`    StaticJsonDocument<200> doc;`);
+              loops.push(`    bool shouldPublish = true;`);
+              loops.push(`    JsonDocument doc;`);
               loops.push(`    #if SIMULATION_MODE`);
               loops.push(`      ${simCode}`);
               loops.push(`      doc["${keyName}"] = val;`);
               loops.push(`    #else`);
+              if (checkDataReadyCode) {
+                loops.push(`      ${checkDataReadyCode}`);
+              }
               loops.push(`      ${realReadCode}`);
               loops.push(`    #endif`);
-              loops.push(`    char buffer[128];`);
-              loops.push(`    serializeJson(doc, buffer);`);
+              loops.push(`    if (shouldPublish) {`);
+              loops.push(`      char buffer[128];`);
+              loops.push(`      serializeJson(doc, buffer);`);
               if (selectedArduinoBoard === 'Arduino UNO R4 WiFi') {
-                loops.push(`    if (client.connected()) {`);
-                loops.push(`      client.publish(TOPIC_${safeName}${topicSuffix}, buffer);`);
-                loops.push(`      Serial.println(String("Published [") + TOPIC_${safeName}${topicSuffix} + "]: " + buffer);`);
-                loops.push(`    }`);
+                loops.push(`      if (client.connected()) {`);
+                loops.push(`        client.publish(TOPIC_${safeName}${topicSuffix}, buffer);`);
+                loops.push(`        Serial.println(String("Published [") + TOPIC_${safeName}${topicSuffix} + "]: " + buffer);`);
+                loops.push(`      }`);
               } else {
-                loops.push(`    Serial.println(String("Simulated [") + TOPIC_${safeName}${topicSuffix} + "]: " + buffer);`);
-                loops.push(`    // client.publish(TOPIC_${safeName}${topicSuffix}, buffer); // Add your network logic here`);
+                loops.push(`      Serial.println(String("Simulated [") + TOPIC_${safeName}${topicSuffix} + "]: " + buffer);`);
+                loops.push(`      // client.publish(TOPIC_${safeName}${topicSuffix}, buffer); // Add your network logic here`);
               }
+              loops.push(`    }`);
               loops.push(`  }\n`);
             }
           }
