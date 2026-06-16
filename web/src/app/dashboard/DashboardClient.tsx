@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { LayoutGrid, Play, Square, FolderOpen, SlidersHorizontal, CheckCircle, AlertTriangle, XCircle, Info, X, Cpu, Settings2, Users } from 'lucide-react';
+import { LayoutGrid, Play, Square, FolderOpen, SlidersHorizontal, CheckCircle, AlertTriangle, XCircle, Info, X, Cpu, Settings2, Users, CircuitBoard, Wifi, Copy, Download, Code, Server, Terminal } from 'lucide-react';
 import { supabase } from '../../lib/supabase/client';
 
 // 알림(Notification) 타입을 정의하고 관리하는 커스텀 훅
@@ -51,31 +51,107 @@ function EquipmentItem({
   );
 }
 
-// 가짜 센서 데이터를 생성하는 커스텀 훅 (5초마다 갱신)
-function useFakeSensors() {
+// 커스텀 다중 선택(Multi-select) 드롭다운 컴포넌트
+function MultiSelectDropdown({ options, selected, onChange }: { 
+  options: { group: string; items: { label: string; value: string }[] }[], 
+  selected: string[], 
+  onChange: (values: string[]) => void 
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const toggleItem = (val: string) => {
+    if (val === 'custom') onChange(['custom']);
+    else {
+      const newSelected = selected.includes(val) 
+        ? selected.filter(v => v !== val) 
+        : [...selected.filter(v => v !== 'custom'), val];
+      onChange(newSelected.length ? newSelected : ['custom']);
+    }
+  };
+
+  return (
+    <div className="relative w-full text-sm" tabIndex={0} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setIsOpen(false); }}>
+      <div className="w-full p-2 border border-gray-300 rounded-lg cursor-pointer bg-white flex justify-between items-center hover:border-secondary transition-colors" onClick={() => setIsOpen(!isOpen)}>
+        <span className="truncate mr-2 text-gray-700 font-medium">
+          {selected.includes('custom') ? 'Custom / None' : selected.map(val => {
+            for (const group of options) {
+              const found = group.items.find(i => i.value === val);
+              if (found) return found.label;
+            }
+            return val;
+          }).join(', ')}
+        </span>
+        <span className="text-gray-400 text-xs">▼</span>
+      </div>
+      {isOpen && (
+        <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-[250px] overflow-y-auto top-full left-0">
+          <label className="flex items-center px-3 py-2.5 hover:bg-gray-50 cursor-pointer text-gray-700 border-b border-gray-100 transition-colors">
+            <input type="checkbox" checked={selected.includes('custom')} onChange={() => toggleItem('custom')} className="mr-3 w-4 h-4 accent-secondary" /> Custom / None
+          </label>
+          {options.map((optGroup) => (
+            <div key={optGroup.group}>
+              <div className="px-3 py-1.5 text-[10px] uppercase tracking-widest font-bold text-gray-500 bg-gray-100">{optGroup.group}</div>
+              {optGroup.items.map((item) => (
+                <label key={item.value} className="flex items-center px-3 py-2.5 hover:bg-light cursor-pointer text-gray-700 transition-colors">
+                  <input type="checkbox" checked={selected.includes(item.value)} onChange={() => toggleItem(item.value)} className="mr-3 w-4 h-4 accent-secondary" /> {item.label}
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// data-logger.py가 Supabase에 저장한 데이터를 실시간으로 가져오는 훅
+function useSupabaseSensors() {
   const [sensors, setSensors] = useState({
-    temperature: 23.5,
-    humidity: 65,
-    light: 200,
-    co2: 500,
-    ph: 6.5,
-    ec: 1.2,
-    do: 7
+    temperature: 0, humidity: 0, light: 0, co2: 0, ph: 0, ec: 0, do: 0
   });
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setSensors(prev => ({
-        temperature: +(prev.temperature + (Math.random() - 0.5) * 0.5).toFixed(1),
-        humidity: Math.max(0, Math.min(100, Math.round(prev.humidity + (Math.random() - 0.5) * 5))),
-        light: Math.max(0, Math.round(prev.light + (Math.random() - 0.5) * 10)),
-        co2: Math.max(400, Math.round(prev.co2 + (Math.random() - 0.5) * 20)),
-        ph: +(prev.ph + (Math.random() - 0.5) * 0.1).toFixed(1),
-        ec: +(prev.ec + (Math.random() - 0.5) * 0.1).toFixed(1),
-        do: +(prev.do + (Math.random() - 0.5) * 0.2).toFixed(1),
-      }));
-    }, 5000);
-    return () => clearInterval(interval);
+    // 1. 페이지 로드 시 최신 데이터 1건 가져오기
+    const fetchLatest = async () => {
+      const { data, error } = await supabase
+        .from('sensor_data')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (data && !error) {
+        setSensors(prev => ({
+          ...prev,
+          temperature: data.temperature ?? prev.temperature,
+          humidity: data.humidity ?? prev.humidity,
+          light: data.light_intensity ?? prev.light,
+        }));
+      }
+    };
+    fetchLatest();
+
+    // 2. data-logger.py가 DB에 새 데이터를 INSERT 할 때마다 실시간 수신
+    const channel = supabase
+      .channel('realtime-sensor-data')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'sensor_data' },
+        (payload) => {
+          const newData = payload.new;
+          setSensors(prev => ({
+            ...prev,
+            temperature: newData.temperature ?? prev.temperature,
+            humidity: newData.humidity ?? prev.humidity,
+            light: newData.light_intensity ?? prev.light,
+          }));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   return sensors;
@@ -91,16 +167,30 @@ function useSystemSettings() {
   });
 
   useEffect(() => {
-    const savedS = localStorage.getItem('sf_active_sensors');
-    const savedE = localStorage.getItem('sf_active_equipment');
-    if (savedS) setActiveSensors(JSON.parse(savedS));
-    if (savedE) setActiveEquipment(JSON.parse(savedE));
+    const loadSettings = async () => {
+      const { data: sensorData } = await supabase.from('app_settings').select('value').eq('key', 'sf_active_sensors').single();
+      const { data: equipData } = await supabase.from('app_settings').select('value').eq('key', 'sf_active_equipment').single();
+      
+      if (sensorData?.value) setActiveSensors(sensorData.value);
+      else {
+        const savedS = localStorage.getItem('sf_active_sensors');
+        if (savedS) setActiveSensors(JSON.parse(savedS));
+      }
+      
+      if (equipData?.value) setActiveEquipment(equipData.value);
+      else {
+        const savedE = localStorage.getItem('sf_active_equipment');
+        if (savedE) setActiveEquipment(JSON.parse(savedE));
+      }
+    };
+    loadSettings();
   }, []);
 
   const toggleSensor = (key: keyof typeof activeSensors) => {
     setActiveSensors(prev => {
       const next = { ...prev, [key]: !prev[key] };
       localStorage.setItem('sf_active_sensors', JSON.stringify(next));
+      supabase.from('app_settings').upsert({ key: 'sf_active_sensors', value: next }).then();
       return next;
     });
   };
@@ -109,6 +199,7 @@ function useSystemSettings() {
     setActiveEquipment(prev => {
       const next = { ...prev, [key]: !prev[key] };
       localStorage.setItem('sf_active_equipment', JSON.stringify(next));
+      supabase.from('app_settings').upsert({ key: 'sf_active_equipment', value: next }).then();
       return next;
     });
   };
@@ -163,10 +254,34 @@ function useEquipmentControl(showNotification: (msg: string, type: NotificationT
   return { equipment, toggleEquipment, startAll, stopAll };
 }
 
+// 아두이노 핀 맵 데이터 정의 (UNO R3 vs UNO R4 WiFi)
+const ARDUINO_PINS = [
+  { id: 'A0', name: 'A0', r3: 'Analog In (10-bit)', r4: 'Analog In (14-bit) / True DAC' },
+  { id: 'A1', name: 'A1', r3: 'Analog In (10-bit)', r4: 'Analog In (14-bit) / OPAMP' },
+  { id: 'A2', name: 'A2', r3: 'Analog In (10-bit)', r4: 'Analog In (14-bit) / OPAMP' },
+  { id: 'A3', name: 'A3', r3: 'Analog In (10-bit)', r4: 'Analog In (14-bit)' },
+  { id: 'A4', name: 'A4', r3: 'Analog In (10-bit) / SDA', r4: 'Analog In (14-bit) / SDA' },
+  { id: 'A5', name: 'A5', r3: 'Analog In (10-bit) / SCL', r4: 'Analog In (14-bit) / SCL' },
+  { id: 'I2C', name: 'I2C Bus (SDA / SCL)', r3: 'I2C Data & Clock Lines', r4: 'I2C Data & Clock Lines / Qwiic', isI2C: true },
+  { id: 'D13', name: 'D13', r3: 'Digital I/O / SPI SCK / Built-in LED', r4: 'Digital I/O / SPI SCK / Built-in LED' },
+  { id: 'D12', name: 'D12', r3: 'Digital I/O / SPI MISO', r4: 'Digital I/O / SPI MISO' },
+  { id: 'D11', name: 'D11', r3: 'Digital I/O / PWM / SPI MOSI', r4: 'Digital I/O / PWM / SPI MOSI' },
+  { id: 'D10', name: 'D10', r3: 'Digital I/O / PWM / SPI SS', r4: 'Digital I/O / PWM / SPI SS' },
+  { id: 'D9', name: 'D9', r3: 'Digital I/O / PWM', r4: 'Digital I/O / PWM' },
+  { id: 'D8', name: 'D8', r3: 'Digital I/O', r4: 'Digital I/O' },
+  { id: 'D7', name: 'D7', r3: 'Digital I/O', r4: 'Digital I/O' },
+  { id: 'D6', name: 'D6', r3: 'Digital I/O / PWM', r4: 'Digital I/O / PWM' },
+  { id: 'D5', name: 'D5', r3: 'Digital I/O / PWM', r4: 'Digital I/O / PWM' },
+  { id: 'D4', name: 'D4', r3: 'Digital I/O', r4: 'Digital I/O' },
+  { id: 'D3', name: 'D3', r3: 'Digital I/O / PWM / Interrupt', r4: 'Digital I/O / PWM / Interrupt' },
+  { id: 'D2', name: 'D2', r3: 'Digital I/O / Interrupt', r4: 'Digital I/O / Interrupt' },
+  { id: 'D1', name: 'D1', r3: 'Digital I/O / Serial TX', r4: 'Digital I/O / Serial1 TX' },
+  { id: 'D0', name: 'D0', r3: 'Digital I/O / Serial RX', r4: 'Digital I/O / Serial1 RX' },
+];
+
 export default function DashboardClient() {
   const searchParams = useSearchParams();
   const currentTab = searchParams.get('tab') || 'dashboard';
-  const sensors = useFakeSensors();
   const { notifications, showNotification } = useNotification();
   const { equipment, toggleEquipment, startAll, stopAll } = useEquipmentControl(showNotification);
 
@@ -189,11 +304,270 @@ export default function DashboardClient() {
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false);
   const [configSensor, setConfigSensor] = useState('Temperature');
-  const [configRate, setConfigRate] = useState('10');
+  const [configRateValue, setConfigRateValue] = useState('10');
+  const [configRateUnit, setConfigRateUnit] = useState('second');
   const [configLower, setConfigLower] = useState('');
   const [configUpper, setConfigUpper] = useState('');
   const [isReviewing, setIsReviewing] = useState(false);
   const [loadedConfigs, setLoadedConfigs] = useState<any[]>([]);
+  const [selectedArduinoBoard, setSelectedArduinoBoard] = useState<string>('Arduino UNO R4 WiFi');
+
+  // 센서 설정 모달이 열리거나 센서 종류(configSensor)를 변경할 때, 기존에 저장된 값을 폼에 불러오기
+  useEffect(() => {
+    const loadConfig = async () => {
+      if (isConfigModalOpen) {
+        const key = `sf_sensor_config_${configSensor.replace(/\s+/g, '_')}`;
+        const { data } = await supabase.from('app_settings').select('value').eq('key', key).single();
+        let parsed = data?.value;
+        
+        if (!parsed) {
+          const saved = localStorage.getItem(key);
+          if (saved) parsed = JSON.parse(saved);
+        }
+        
+        if (parsed) {
+          if (parsed.samplingRateValue) {
+            setConfigRateValue(parsed.samplingRateValue.toString());
+            setConfigRateUnit(parsed.samplingRateUnit || 'second');
+          } else {
+            setConfigRateValue(parsed.samplingRate?.toString() || '10');
+            setConfigRateUnit('second');
+          }
+          setConfigLower(parsed.lowerThreshold !== undefined ? parsed.lowerThreshold.toString() : '');
+          setConfigUpper(parsed.upperThreshold !== undefined ? parsed.upperThreshold.toString() : '');
+        } else {
+          setConfigRateValue('10');
+          setConfigRateUnit('second');
+          setConfigLower('');
+          setConfigUpper('');
+        }
+      }
+    };
+    loadConfig();
+  }, [isConfigModalOpen, configSensor]);
+
+  // 센서 설정값을 화면에 바로 표시하기 위한 상태 관리
+  const [sensorConfigs, setSensorConfigs] = useState<Record<string, { lowerThreshold: number, upperThreshold: number, samplingRate: string | number, samplingRateValue?: number, samplingRateUnit?: string }>>({});
+
+  const loadAllSensorConfigs = async () => {
+    const sensorsList = ["Temperature", "Light Intensity", "Humidity", "Hydrogen Ion Concentration", "Electrical Conductivity", "Dissolved Oxygen", "Carbon Dioxide"];
+    const newConfigs: Record<string, any> = {};
+    
+    const keys = sensorsList.map(s => `sf_sensor_config_${s.replace(/\s+/g, '_')}`);
+    const { data } = await supabase.from('app_settings').select('key, value').in('key', keys);
+    
+    sensorsList.forEach(s => {
+      const key = `sf_sensor_config_${s.replace(/\s+/g, '_')}`;
+      const dbItem = data?.find(d => d.key === key);
+      if (dbItem?.value) {
+        newConfigs[s] = dbItem.value;
+      } else {
+        const saved = localStorage.getItem(key);
+        if (saved) newConfigs[s] = JSON.parse(saved);
+      }
+    });
+    setSensorConfigs(newConfigs);
+  };
+
+  useEffect(() => {
+    loadAllSensorConfigs();
+  }, []);
+  
+  // 아두이노 핀 연결 상태 관리
+  // 사용자가 쉽게 테스트할 수 있도록 자주 쓰이는 센서/기기를 기본값으로 세팅
+  const [pinConfigs, setPinConfigs] = useState<Record<string, string[]>>({
+    D2: ['DHT22 Temp/Humid Sensor'],
+    A0: ['Soil Moisture Sensor'],
+    A1: ['LDR Light Sensor'],
+    D3: ['Relay CH1 (Grow Light)'],
+    D4: ['Relay CH2 (Ventilation Fan)'],
+    D5: ['Relay CH3 (Water Pump)'],
+    I2C: ['LCD 16x2 I2C', 'BME280 Temp/Humid Sensor']
+  });
+  const [pinMappings, setPinMappings] = useState<Record<string, string[][]>>({
+    D2: [['Temperature', 'Humidity']],
+    A0: [['custom']],
+    A1: [['Light Intensity']],
+    D3: [['growLight']],
+    D4: [['circulationFan']],
+    D5: [['waterPump']],
+    I2C: [['custom'], ['Temperature', 'Humidity']]
+  });
+  const [pinMqttTopics, setPinMqttTopics] = useState<Record<string, string[][]>>({
+    D2: [['smartfarm/uno-r4/sensors']],
+    A0: [['smartfarm/uno-r4/sensors']],
+    A1: [['smartfarm/uno-r4/sensors']],
+    D3: [['smartfarm/uno-r4/actuators/control']],
+    D4: [['smartfarm/uno-r4/actuators/control']],
+    D5: [['smartfarm/uno-r4/actuators/control']],
+    I2C: [['smartfarm/uno-r4/actuators/control'], ['smartfarm/uno-r4/sensors', 'smartfarm/uno-r4/sensors']]
+  });
+  const [wifiSsid, setWifiSsid] = useState('');
+  const [wifiPassword, setWifiPassword] = useState('');
+  const [mqttServer, setMqttServer] = useState('');
+  const [mqttUsername, setMqttUsername] = useState('');
+  const [mqttPassword, setMqttPassword] = useState('');
+  const [pinCounts, setPinCounts] = useState<Record<string, number>>({ I2C: 2 });
+  const [generatedCode, setGeneratedCode] = useState<string>('');
+  const [isCodeModalOpen, setIsCodeModalOpen] = useState(false);
+  const [generatedPythonCode, setGeneratedPythonCode] = useState<string>('');
+  const [isPythonModalOpen, setIsPythonModalOpen] = useState(false);
+  const [remoteLoggerRunning, setRemoteLoggerRunning] = useState<boolean>(false);
+  const [generatedAgentCode, setGeneratedAgentCode] = useState<string>('');
+  const [isAgentModalOpen, setIsAgentModalOpen] = useState(false);
+
+  // Supabase 실시간 센서 데이터 연동
+  const sensors = useSupabaseSensors();
+
+  // Network & MQTT Configuration 로드
+  useEffect(() => {
+    const loadNetworkSettings = async () => {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', 'sf_network_mqtt').single();
+      if (data?.value) {
+        setWifiSsid(data.value.wifiSsid || '');
+        setWifiPassword(data.value.wifiPassword || '');
+        setMqttServer(data.value.mqttServer || '');
+        setMqttUsername(data.value.mqttUsername || '');
+        setMqttPassword(data.value.mqttPassword || '');
+      }
+      
+      // 라즈베리파이 원격 로거 상태 로드
+      const { data: loggerData } = await supabase.from('app_settings').select('value').eq('key', 'sf_logger_status').single();
+      if (loggerData?.value) {
+        setRemoteLoggerRunning(loggerData.value.running || false);
+      } else {
+        const savedWifiSsid = localStorage.getItem('sf_wifi_ssid');
+        const savedWifiPass = localStorage.getItem('sf_wifi_password');
+        const savedMqttServer = localStorage.getItem('sf_mqtt_server');
+        const savedMqttUser = localStorage.getItem('sf_mqtt_username');
+        const savedMqttPass = localStorage.getItem('sf_mqtt_password');
+        
+        if (savedWifiSsid) setWifiSsid(savedWifiSsid);
+        if (savedWifiPass) setWifiPassword(savedWifiPass);
+        if (savedMqttServer) setMqttServer(savedMqttServer);
+        if (savedMqttUser) setMqttUsername(savedMqttUser);
+        if (savedMqttPass) setMqttPassword(savedMqttPass);
+      }
+    };
+    loadNetworkSettings();
+  }, []);
+
+  // Network & MQTT Configuration 저장
+  const handleSaveNetworkConfig = async () => {
+    const networkData = { wifiSsid, wifiPassword, mqttServer, mqttUsername, mqttPassword };
+    await supabase.from('app_settings').upsert({ key: 'sf_network_mqtt', value: networkData });
+    
+    localStorage.setItem('sf_wifi_ssid', wifiSsid);
+    localStorage.setItem('sf_wifi_password', wifiPassword);
+    localStorage.setItem('sf_mqtt_server', mqttServer);
+    localStorage.setItem('sf_mqtt_username', mqttUsername);
+    localStorage.setItem('sf_mqtt_password', mqttPassword);
+    showNotification('Network & MQTT configuration saved!', 'success');
+  };
+
+  // Hardware Pin Configuration 로드
+  useEffect(() => {
+    const loadHardwareSettings = async () => {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', 'sf_hardware_pins').single();
+      let parsed = data?.value;
+      if (!parsed) {
+        const saved = localStorage.getItem('sf_hardware_pins');
+        if (saved) parsed = JSON.parse(saved);
+      }
+      if (parsed) {
+        if (parsed.pinConfigs) setPinConfigs(parsed.pinConfigs);
+        if (parsed.pinMappings) setPinMappings(parsed.pinMappings);
+        if (parsed.pinMqttTopics) setPinMqttTopics(parsed.pinMqttTopics);
+        if (parsed.pinCounts) setPinCounts(parsed.pinCounts);
+        // SCL/SDA 분리 구조를 I2C 하나로 합치는 하위 호환성 마이그레이션 함수
+        const migrateI2C = (obj: any) => {
+          if (!obj) return obj;
+          const newObj = { ...obj };
+          if (newObj.SCL) { newObj.I2C = newObj.SCL; delete newObj.SCL; }
+          if (newObj.SDA) delete newObj.SDA;
+          return newObj;
+        };
+        
+        const migratedConfigs = migrateI2C(parsed.pinConfigs);
+        const migratedCounts = migrateI2C(parsed.pinCounts);
+        
+        // 기존 단일 선택(String) 구조를 다중 선택(Array) 구조로 자동 변환
+        const migratedMappings: Record<string, string[][]> = {};
+        const oldMappings = migrateI2C(parsed.pinMappings);
+        if (oldMappings) {
+          Object.entries(oldMappings).forEach(([k, v]) => { migratedMappings[k] = Array.isArray(v) ? v.map((item: any) => Array.isArray(item) ? item : [item]) : [['custom']]; });
+        }
+
+        // 동일하게 topics도 다중 배열 구조로 마이그레이션
+        const migratedTopics: Record<string, string[][]> = {};
+        const oldTopics = migrateI2C(parsed.pinMqttTopics);
+        if (oldTopics) {
+          Object.entries(oldTopics).forEach(([k, v]) => { migratedTopics[k] = Array.isArray(v) ? v.map((item: any) => Array.isArray(item) ? item : [item]) : [['']]; });
+        }
+
+        if (migratedConfigs) setPinConfigs(migratedConfigs);
+        if (migratedMappings && Object.keys(migratedMappings).length > 0) setPinMappings(migratedMappings);
+        if (migratedTopics && Object.keys(migratedTopics).length > 0) setPinMqttTopics(migratedTopics);
+        if (migratedCounts) setPinCounts(migratedCounts);
+      }
+    };
+    loadHardwareSettings();
+  }, []);
+
+  // Hardware Pin Configuration 저장
+  const handleSaveHardwareConfig = async () => {
+    const hardwareData = { pinConfigs, pinMappings, pinMqttTopics, pinCounts };
+    await supabase.from('app_settings').upsert({ key: 'sf_hardware_pins', value: hardwareData });
+    localStorage.setItem('sf_hardware_pins', JSON.stringify(hardwareData));
+    showNotification('Hardware pin configuration saved!', 'success');
+  };
+
+  // 라즈베리파이 원격 로거 시작/정지 토글 함수
+  const handleToggleRemoteLogger = async (state: boolean) => {
+    setRemoteLoggerRunning(state);
+    await supabase.from('app_settings').upsert({ key: 'sf_logger_status', value: { running: state } });
+    showNotification(state ? 'Start command sent to Raspberry Pi Agent!' : 'Stop command sent to Raspberry Pi Agent.', state ? 'success' : 'warning');
+  };
+
+  const handlePinDeviceChange = (pinId: string, index: number, value: string) => {
+    setPinConfigs(prev => {
+      const current = prev[pinId] || [];
+      const next = [...current];
+      next[index] = value;
+      return { ...prev, [pinId]: next };
+    });
+  };
+
+  const handlePinMappingChange = (pinId: string, index: number, value: string[]) => {
+    setPinMappings(prev => {
+      const current = prev[pinId] || [];
+      const next = [...current];
+      next[index] = value;
+      return { ...prev, [pinId]: next };
+    });
+    
+    // 매핑 항목 수에 맞게 MQTT Topic 배열 개수도 동기화
+    setPinMqttTopics(prev => {
+      const current = prev[pinId] || [];
+      const next = [...current];
+      const currentTopics = next[index] || [];
+      
+      const newTopics = value.map((_, i) => currentTopics[i] !== undefined ? currentTopics[i] : (currentTopics[currentTopics.length - 1] || 'smartfarm/uno-r4/topic'));
+      next[index] = newTopics;
+      return { ...prev, [pinId]: next };
+    });
+  };
+
+  const handlePinMqttTopicChange = (pinId: string, index: number, topicIndex: number, value: string) => {
+    setPinMqttTopics(prev => {
+      const current = prev[pinId] || [];
+      const next = [...current];
+      const nextTopics = [...(next[index] || [])];
+      nextTopics[topicIndex] = value;
+      next[index] = nextTopics;
+      return { ...prev, [pinId]: next };
+    });
+  };
 
   // 센서별 단위(Unit) 반환 함수
   const getUnit = (sensor: string) => {
@@ -209,6 +583,343 @@ export default function DashboardClient() {
     }
   };
 
+  // 카드 화면에 표시할 샘플링 주기 포맷 함수
+  const formatSamplingRate = (config: any) => {
+    if (config.samplingRateValue && config.samplingRateUnit) {
+      const unitMap: Record<string, string> = { second: 'sec', minute: 'min', hour: 'hr' };
+      return `${config.samplingRateValue} ${unitMap[config.samplingRateUnit] || 'sec'}`;
+    }
+    return `${config.samplingRate} sec`;
+  };
+
+  // 사용자가 입력한 기기명을 기반으로 C++ 아두이노 코드를 자동 생성하는 함수
+  const handleGenerateCode = () => {
+    let code = `// Auto-generated Smart Farm Sketch\n// Board: ${selectedArduinoBoard}\n\n`;
+    let includes = new Set<string>();
+    let defines: string[] = [];
+    let globalVars: string[] = [];
+    let setups: string[] = [];
+    let loops: string[] = [];
+    let customFunctions: string[] = [];
+    let usesI2C = false;
+    
+    defines.push(`#define SIMULATION_MODE 1 // 1: Simulator (Random Data), 0: Real Hardware`);
+    
+    if (selectedArduinoBoard === 'Arduino UNO R4 WiFi') {
+      includes.add('#include <WiFiS3.h>');
+      includes.add('#include <PubSubClient.h>');
+      
+      // URL 자동 파싱 (호스트명과 포트 분리)
+      let parsedServer = mqttServer;
+      let parsedPort = 8883;
+      try {
+        const urlToParse = mqttServer.includes('://') ? mqttServer : `mqtts://${mqttServer}`;
+        const url = new URL(urlToParse);
+        parsedServer = url.hostname || mqttServer;
+        if (url.port) parsedPort = parseInt(url.port, 10);
+      } catch(e) {}
+
+      defines.push(`// --- Network & MQTT Config ---`);
+      defines.push(`const char* ssid = "${wifiSsid}";`);
+      defines.push(`const char* password = "${wifiPassword}";`);
+      defines.push(`const char* mqtt_server = "${parsedServer}";`);
+      defines.push(`const int mqtt_port = ${parsedPort};`);
+      defines.push(`const char* mqtt_user = "${mqttUsername}";`);
+      defines.push(`const char* mqtt_pass = "${mqttPassword}";`);
+      defines.push(`\nWiFiSSLClient espClient;`);
+      defines.push(`PubSubClient client(espClient);\n`);
+
+      customFunctions.push(`void setupWiFi() {\n  Serial.print("[WiFi] Connecting to ");\n  Serial.println(ssid);\n  WiFi.begin(ssid, password);\n  while (WiFi.status() != WL_CONNECTED) {\n    delay(500);\n    Serial.print(".");\n  }\n  Serial.print("\\n[WiFi] Connected. IP: ");\n  Serial.println(WiFi.localIP());\n}`);
+      customFunctions.push(`void checkNetworkAndMQTT() {\n  if (WiFi.status() != WL_CONNECTED) {\n    Serial.println("[WiFi] Connection lost. Reconnecting...");\n    WiFi.disconnect();\n    setupWiFi();\n  }\n  while (!client.connected()) {\n    Serial.print("[MQTT] Attempting connection...");\n    String clientId = "ArduinoClient-" + String(random(0xffff), HEX);\n    if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass)) {\n      Serial.println("connected!");\n    } else {\n      Serial.print("failed, rc=");\n      Serial.print(client.state());\n      Serial.println(" try again in 5 seconds");\n      delay(5000);\n    }\n  }\n}`);
+      
+      setups.push(`  setupWiFi();`);
+      setups.push(`  client.setServer(mqtt_server, mqtt_port);`);
+    }
+
+    Object.entries(pinConfigs).forEach(([pinId, devices]) => {
+      devices.forEach((device, index) => {
+        if (!device.trim()) return;
+        const devLower = device.toLowerCase();
+        
+        let sensorVarName = "";
+
+        // 기기명 키워드 감지를 통한 라이브러리 자동 추가
+        if (devLower.includes('dht')) {
+          includes.add('#include <DHT.h>');
+          sensorVarName = `dht_${pinId}_${index}`;
+        } else if (devLower.includes('lcd') && devLower.includes('i2c')) {
+          includes.add('#include <Wire.h>');
+          includes.add('#include <LiquidCrystal_I2C.h>');
+        } else if (devLower.includes('bme280')) {
+          includes.add('#include <Wire.h>');
+          includes.add('#include <Adafruit_Sensor.h>');
+          includes.add('#include <Adafruit_BME280.h>');
+          sensorVarName = `bme_${pinId}_${index}`;
+        } else if (devLower.includes('sht31')) {
+          includes.add('#include <Wire.h>');
+          includes.add('#include <Adafruit_SHT31.h>');
+          sensorVarName = `sht31_${pinId}_${index}`;
+        } else if (devLower.includes('scd4')) {
+          includes.add('#include <Wire.h>');
+          includes.add('#include <SensirionI2CScd4x.h>');
+          sensorVarName = `scd4x_${pinId}_${index}`;
+        } else if (devLower.includes('tsl2591')) {
+          includes.add('#include <Wire.h>');
+          includes.add('#include <Adafruit_Sensor.h>');
+          includes.add('#include <Adafruit_TSL2591.h>');
+          sensorVarName = `tsl2591_${pinId}_${index}`;
+        } else if (devLower.includes('servo')) {
+          includes.add('#include <Servo.h>');
+        }
+
+        const safeName = device.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase().substring(0, 15) + '_' + pinId + (pinId === 'I2C' ? `_${index}` : '');
+
+        // 일반 디지털/아날로그 핀에 대한 #define 및 pinMode 추론
+        if (pinId !== 'I2C') {
+          const safeName = device.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase().substring(0, 15) + '_' + pinId;
+          const rawPin = pinId.startsWith('D') ? pinId.substring(1) : pinId; // D2 -> 2
+          defines.push(`#define PIN_${safeName} ${rawPin} // ${device}`);
+          
+          if (devLower.includes('relay') || devLower.includes('led') || devLower.includes('pump') || devLower.includes('fan')) {
+            setups.push(`  pinMode(PIN_${safeName}, OUTPUT);`);
+          } else if (devLower.includes('sensor') || devLower.includes('ldr') || devLower.includes('button')) {
+            setups.push(`  pinMode(PIN_${safeName}, INPUT);`);
+          }
+          
+          if (sensorVarName && devLower.includes('dht')) {
+            globalVars.push(`DHT ${sensorVarName}(PIN_${safeName}, DHT22);`);
+            setups.push(`  ${sensorVarName}.begin();`);
+          }
+        }
+        
+        // I2C 센서 전역 변수 및 setup 코드 자동 생성
+        if (pinId === 'I2C' && sensorVarName) {
+          usesI2C = true;
+          if (devLower.includes('bme280')) {
+            globalVars.push(`Adafruit_BME280 ${sensorVarName};`);
+            setups.push(`  if (!${sensorVarName}.begin(0x76)) Serial.println("Could not find BME280 sensor!");`);
+          } else if (devLower.includes('sht31')) {
+            globalVars.push(`Adafruit_SHT31 ${sensorVarName} = Adafruit_SHT31();`);
+            setups.push(`  if (!${sensorVarName}.begin(0x44)) Serial.println("Couldn't find SHT31!");`);
+          } else if (devLower.includes('scd4')) {
+            globalVars.push(`SensirionI2CScd4x ${sensorVarName};`);
+            setups.push(`  ${sensorVarName}.begin(Wire);\n  ${sensorVarName}.startPeriodicMeasurement();`);
+          } else if (devLower.includes('tsl2591')) {
+            globalVars.push(`Adafruit_TSL2591 ${sensorVarName} = Adafruit_TSL2591(2591);`);
+            setups.push(`  if (${sensorVarName}.begin()) {\n    ${sensorVarName}.setGain(TSL2591_GAIN_MED);\n    ${sensorVarName}.setTiming(TSL2591_INTEGRATIONTIME_300MS);\n  } else {\n    Serial.println("No TSL2591 found!");\n  }`);
+          }
+        }
+
+        const topics = pinMqttTopics[pinId]?.[index] || [];
+        const mappings = pinMappings[pinId]?.[index] || [];
+        topics.forEach((topic, tIdx) => {
+          if (topic && topic.trim() !== '') {
+            const topicSuffix = topics.length > 1 ? `_${tIdx}` : '';
+            defines.push(`const char* TOPIC_${safeName}${topicSuffix} = "${topic}";`);
+            
+            const mapping = mappings[tIdx];
+            const sensorTypes = ['Temperature', 'Humidity', 'Light Intensity', 'Hydrogen Ion Concentration', 'Electrical Conductivity', 'Dissolved Oxygen', 'Carbon Dioxide'];
+            
+            // 센서일 경우에만 시뮬레이터 및 JSON 로직 생성
+            if (mapping && sensorTypes.includes(mapping)) {
+              let min = 0, max = 100, isFloat = false, keyName = 'sensor_value';
+              if (mapping === 'Temperature') { min = 20; max = 30; isFloat = true; keyName = 'temperature'; }
+              else if (mapping === 'Humidity') { min = 40; max = 80; isFloat = false; keyName = 'humidity'; }
+              else if (mapping === 'Light Intensity') { min = 200; max = 800; isFloat = false; keyName = 'light_intensity'; }
+              else if (mapping === 'Hydrogen Ion Concentration') { min = 5; max = 8; isFloat = true; keyName = 'ph'; }
+              else if (mapping === 'Electrical Conductivity') { min = 1; max = 3; isFloat = true; keyName = 'ec'; }
+              else if (mapping === 'Dissolved Oxygen') { min = 5; max = 9; isFloat = true; keyName = 'do'; }
+              else if (mapping === 'Carbon Dioxide') { min = 400; max = 800; isFloat = false; keyName = 'co2'; }
+              
+              const conf = sensorConfigs[mapping];
+              const intervalMs = conf ? (parseFloat(conf.samplingRate?.toString() || '10') * 1000) : 10000;
+              
+              globalVars.push(`unsigned long last_${safeName}${topicSuffix} = 0;`);
+              globalVars.push(`const unsigned long interval_${safeName}${topicSuffix} = ${intervalMs};`);
+              includes.add('#include <ArduinoJson.h>');
+              
+              let simCode = isFloat ? `float val = random(${min * 10}, ${max * 10}) / 10.0;` : `int val = random(${min}, ${max});`;
+              
+              let realReadCode = `// TODO: Add real sensor read logic from ${device} here\n      doc["${keyName}"] = 0;`;
+              if (sensorVarName) {
+                if (devLower.includes('dht') || devLower.includes('bme280') || devLower.includes('sht31')) {
+                  if (mapping === 'Temperature') {
+                    realReadCode = `doc["${keyName}"] = ${sensorVarName}.readTemperature();`;
+                  } else {
+                    realReadCode = `doc["${keyName}"] = ${sensorVarName}.readHumidity();`;
+                  }
+                } else if (devLower.includes('scd4')) {
+                  realReadCode = `uint16_t co2; float temp, hum;\n      ${sensorVarName}.readMeasurement(co2, temp, hum);\n`;
+                  if (mapping === 'Carbon Dioxide') {
+                    realReadCode += `      doc["${keyName}"] = co2;`;
+                  } else if (mapping === 'Temperature') {
+                    realReadCode += `      doc["${keyName}"] = temp;`;
+                  } else {
+                    realReadCode += `      doc["${keyName}"] = hum;`;
+                  }
+                } else if (devLower.includes('tsl2591')) {
+                  realReadCode = `uint32_t lum = ${sensorVarName}.getFullLuminosity();\n      doc["${keyName}"] = ${sensorVarName}.calculateLux(lum & 0xFFFF, lum >> 16);`;
+                }
+              } else if (pinId !== 'I2C') {
+                const safeNamePin = device.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase().substring(0, 15) + '_' + pinId;
+                realReadCode = `doc["${keyName}"] = analogRead(PIN_${safeNamePin}); // TODO: Convert analog raw value`;
+              }
+
+              loops.push(`  if (millis() - last_${safeName}${topicSuffix} >= interval_${safeName}${topicSuffix}) {`);
+              loops.push(`    last_${safeName}${topicSuffix} = millis();`);
+              loops.push(`    StaticJsonDocument<200> doc;`);
+              loops.push(`    #if SIMULATION_MODE`);
+              loops.push(`      ${simCode}`);
+              loops.push(`      doc["${keyName}"] = val;`);
+              loops.push(`    #else`);
+              loops.push(`      ${realReadCode}`);
+              loops.push(`    #endif`);
+              loops.push(`    char buffer[128];`);
+              loops.push(`    serializeJson(doc, buffer);`);
+              if (selectedArduinoBoard === 'Arduino UNO R4 WiFi') {
+                loops.push(`    if (client.connected()) {`);
+                loops.push(`      client.publish(TOPIC_${safeName}${topicSuffix}, buffer);`);
+                loops.push(`      Serial.println(String("Published [") + TOPIC_${safeName}${topicSuffix} + "]: " + buffer);`);
+                loops.push(`    }`);
+              } else {
+                loops.push(`    Serial.println(String("Simulated [") + TOPIC_${safeName}${topicSuffix} + "]: " + buffer);`);
+                loops.push(`    // client.publish(TOPIC_${safeName}${topicSuffix}, buffer); // Add your network logic here`);
+              }
+              loops.push(`  }\n`);
+            }
+          }
+        });
+      });
+    });
+
+    if (includes.size > 0) {
+      code += `// --- Libraries ---\n`;
+      Array.from(includes).forEach(inc => code += `${inc}\n`);
+      code += `\n`;
+    }
+
+    if (defines.length > 0) {
+      code += `// --- Configurations & Pin Definitions ---\n`;
+      defines.forEach(def => code += `${def}\n`);
+      code += `\n`;
+    }
+    
+    if (globalVars.length > 0) {
+      code += `// --- Global Variables & Timers ---\n`;
+      globalVars.forEach(v => code += `${v}\n`);
+      code += `\n`;
+    }
+
+    if (customFunctions.length > 0) {
+      code += `// --- Core Functions ---\n`;
+      customFunctions.forEach(f => code += `${f}\n\n`);
+    }
+
+    if (usesI2C) {
+      setups.unshift(`  Wire.begin();`);
+    }
+
+    code += `void setup() {\n  Serial.begin(115200);\n  Serial.println("Smart Farm Node Starting...");\n\n`;
+    if (setups.length > 0) setups.forEach(s => code += `${s}\n`);
+    code += `}\n\n`;
+    code += `void loop() {\n`;
+    if (selectedArduinoBoard === 'Arduino UNO R4 WiFi') {
+      code += `  if (!client.connected()) {\n    checkNetworkAndMQTT();\n  }\n  client.loop();\n\n`;
+    }
+    if (loops.length > 0) loops.forEach(l => code += `${l}\n`);
+    code += `}\n`;
+
+    setGeneratedCode(code);
+    setIsCodeModalOpen(true);
+    showNotification('Arduino Sketch generated successfully!', 'success');
+  };
+
+  // Raspberry Pi (Python) 코드 자동 생성 함수
+  const handleGeneratePythonCode = () => {
+    // URL에서 Host 부분만 추출
+    let parsedServer = mqttServer;
+    try {
+      const urlToParse = mqttServer.includes('://') ? mqttServer : `mqtts://${mqttServer}`;
+      parsedServer = new URL(urlToParse).hostname || mqttServer;
+    } catch(e) {}
+
+    const pythonCode = `import os
+import json
+import time
+import paho.mqtt.client as mqtt
+from supabase import create_client, Client
+
+# --- Auto-generated Configurations ---
+SUPABASE_URL = "${process.env.NEXT_PUBLIC_SUPABASE_URL || 'YOUR_SUPABASE_URL'}"
+SUPABASE_KEY = "YOUR_SUPABASE_SERVICE_ROLE_KEY" # Warning: Replace with your actual Service Role Key!
+
+MQTT_HOST = "${parsedServer}"
+MQTT_PORT = 8883
+MQTT_USERNAME = "${mqttUsername}"
+MQTT_PASSWORD = "${mqttPassword}"
+# -------------------------------------
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        print(f"[MQTT] Connected successfully to {MQTT_HOST}")
+        client.subscribe("smartfarm/+/sensors")
+    else:
+        print(f"[MQTT] Connection failed with code {rc}")
+
+# ... (Data logging & DB Insert Logic will be placed here) ...
+
+print("Data Logger Agent is starting...")
+# client.loop_forever()
+`;
+    setGeneratedPythonCode(pythonCode);
+    setIsPythonModalOpen(true);
+  };
+
+  // 파수꾼 에이전트(agent.py) 코드 자동 생성 함수
+  const handleGenerateAgentCode = () => {
+    const agentCode = `import os
+import time
+import subprocess
+from supabase import create_client, Client
+
+# --- Auto-generated Configurations ---
+SUPABASE_URL = "${process.env.NEXT_PUBLIC_SUPABASE_URL || 'YOUR_SUPABASE_URL'}"
+SUPABASE_KEY = "YOUR_SUPABASE_SERVICE_ROLE_KEY" # Warning: Replace with your actual Service Role Key!
+# -------------------------------------
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+logger_process = None
+
+print("Agent is running and listening for remote commands from Dashboard...")
+
+while True:
+    try:
+        response = supabase.table("app_settings").select("value").eq("key", "sf_logger_status").execute()
+        
+        if response.data and len(response.data) > 0:
+            settings = response.data[0].get("value", {})
+            should_run = settings.get("running", False)
+
+            if should_run and logger_process is None:
+                print("[Command Received] START -> Starting data-logger.py...")
+                logger_process = subprocess.Popen(["python", "data-logger.py"])
+            elif not should_run and logger_process is not None:
+                print("[Command Received] STOP -> Terminating data-logger.py...")
+                logger_process.terminate()
+                logger_process.wait()
+                logger_process = None
+                
+    except Exception as e:
+        print(f"Error checking status: {e}")
+
+    time.sleep(5) # 5초마다 웹 대시보드의 스위치 상태 확인
+`;
+    setGeneratedAgentCode(agentCode);
+    setIsAgentModalOpen(true);
+  };
+
   // 설정 리뷰 및 검증 로직
   const reviewConfig = () => {
     if (!configLower || !configUpper) return showNotification('Please enter both lower and upper thresholds.', 'warning');
@@ -217,17 +928,24 @@ export default function DashboardClient() {
   };
 
   // 설정 저장 로직 (localStorage 활용)
-  const saveConfig = () => {
+  const saveConfig = async () => {
     const configData = {
-      samplingRate: configRate,
+      samplingRateValue: parseFloat(configRateValue) || 10,
+      samplingRateUnit: configRateUnit,
+      samplingRate: (parseFloat(configRateValue) || 10) * (configRateUnit === 'minute' ? 60 : configRateUnit === 'hour' ? 3600 : 1), // 하위 호환성용 초단위 변환
       lowerThreshold: parseFloat(configLower),
       upperThreshold: parseFloat(configUpper),
       lastUpdated: new Date().toISOString()
     };
     
-    localStorage.setItem(`sf_sensor_config_${configSensor.replace(/\s+/g, '_')}`, JSON.stringify(configData));
+    const key = `sf_sensor_config_${configSensor.replace(/\s+/g, '_')}`;
+    await supabase.from('app_settings').upsert({ key, value: configData });
+    localStorage.setItem(key, JSON.stringify(configData));
+    
     showNotification(`${configSensor} configuration saved successfully!`, 'success');
     
+    loadAllSensorConfigs(); // 저장 후 상태 갱신
+
     setConfigLower('');
     setConfigUpper('');
     setIsReviewing(false);
@@ -247,8 +965,35 @@ export default function DashboardClient() {
     await supabase.auth.signOut();
   };
 
+  // 센서의 측정값과 임계값(Threshold)을 비교하여 상태(정상/경고)를 반환하는 함수
+  const getSensorStatus = (sensorName: string, value: number, isActive: boolean, defaultText: string) => {
+    if (!isActive) return { text: 'Disabled', bg: 'bg-gray-400' };
+    const config = sensorConfigs[sensorName];
+    if (config && (value < config.lowerThreshold || value > config.upperThreshold)) {
+      return { text: 'Out of Range', bg: 'bg-danger' };
+    }
+    return { text: defaultText, bg: 'bg-success' };
+  };
+
+  const tempStatus = getSensorStatus('Temperature', sensors.temperature, activeSensors.temperature, 'Normal');
+  const humStatus = getSensorStatus('Humidity', sensors.humidity, activeSensors.humidity, 'Optimal');
+  const lightStatus = getSensorStatus('Light Intensity', sensors.light, activeSensors.light, 'Normal');
+  const co2Status = getSensorStatus('Carbon Dioxide', sensors.co2, activeSensors.co2, 'Optimal');
+  const phStatus = getSensorStatus('Hydrogen Ion Concentration', sensors.ph, activeSensors.ph, 'Optimal');
+  const ecStatus = getSensorStatus('Electrical Conductivity', sensors.ec, activeSensors.ec, 'Optimal');
+  const doStatus = getSensorStatus('Dissolved Oxygen', sensors.do, activeSensors.do, 'Optimal');
+
+  // 다중 선택 드롭다운 옵션 정의
+  const mappingOptions = [
+    { group: 'Sensors', items: [
+      { label: 'Temperature', value: 'Temperature' }, { label: 'Humidity', value: 'Humidity' }, { label: 'Light Intensity', value: 'Light Intensity' },
+      { label: 'pH', value: 'Hydrogen Ion Concentration' }, { label: 'EC', value: 'Electrical Conductivity' }, { label: 'DO', value: 'Dissolved Oxygen' }, { label: 'Carbon Dioxide', value: 'Carbon Dioxide' }
+    ]},
+    { group: 'Equipment', items: Object.entries(equipmentNamesList).map(([k, v]) => ({ label: v, value: k })) }
+  ];
+
   return (
-    <div className="animate-[fadeIn_0.5s_ease-in-out]">
+    <div className="animate-[fadeIn_0.5s_ease-in-out] w-full">
       {currentTab === 'dashboard' && (
         <div>
           <div className="flex justify-between items-center mb-6">
@@ -282,11 +1027,19 @@ export default function DashboardClient() {
             <h2 className="text-2xl font-semibold text-primary">Sensor Monitoring</h2>
             <div className="flex gap-4">
               <button 
-                onClick={() => {
+                onClick={async () => {
                   const sensorsList = ["Temperature", "Light Intensity", "Humidity", "Hydrogen Ion Concentration", "Electrical Conductivity", "Dissolved Oxygen", "Carbon Dioxide"];
+                  const keys = sensorsList.map(s => `sf_sensor_config_${s.replace(/\s+/g, '_')}`);
+                  const { data } = await supabase.from('app_settings').select('key, value').in('key', keys);
+
                   const configs = sensorsList.map(s => {
-                    const saved = localStorage.getItem(`sf_sensor_config_${s.replace(/\s+/g, '_')}`);
+                    const key = `sf_sensor_config_${s.replace(/\s+/g, '_')}`;
+                    const dbItem = data?.find(d => d.key === key);
+                    if (dbItem?.value) return { sensor: s, ...dbItem.value };
+                    
+                    const saved = localStorage.getItem(key);
                     if (saved) return { sensor: s, ...JSON.parse(saved) };
+                    
                     return { sensor: s, empty: true };
                   });
                   setLoadedConfigs(configs);
@@ -315,20 +1068,35 @@ export default function DashboardClient() {
               <div className={`bg-light p-8 rounded-xl text-center transition-colors ${activeSensors.temperature ? 'hover:bg-gray-200' : 'opacity-40 grayscale pointer-events-none'}`}>
                 <div className="text-secondary mb-4"><i className="mdi mdi-thermometer text-5xl"></i></div>
                 <div className="text-lg font-semibold text-primary">Temperature</div>
+                {sensorConfigs['Temperature'] && (
+                  <div className="text-xs text-gray-500 font-medium mt-1">
+                    Limit: {sensorConfigs['Temperature'].lowerThreshold}°C ~ {sensorConfigs['Temperature'].upperThreshold}°C ({formatSamplingRate(sensorConfigs['Temperature'])})
+                  </div>
+                )}
                 <div className="text-4xl font-bold my-5 text-primary">{activeSensors.temperature ? `${sensors.temperature.toFixed(1)}°C` : '-'}</div>
-                <span className={`px-4 py-1.5 rounded-full text-xs font-medium text-white tracking-wide ${activeSensors.temperature ? 'bg-success' : 'bg-gray-400'}`}>{activeSensors.temperature ? 'Normal' : 'Disabled'}</span>
+                <span className={`px-4 py-1.5 rounded-full text-xs font-medium text-white tracking-wide ${tempStatus.bg}`}>{tempStatus.text}</span>
               </div>
               <div className={`bg-light p-8 rounded-xl text-center transition-colors ${activeSensors.humidity ? 'hover:bg-gray-200' : 'opacity-40 grayscale pointer-events-none'}`}>
                 <div className="text-secondary mb-4"><i className="mdi mdi-water-percent text-5xl"></i></div>
                 <div className="text-lg font-semibold text-primary">Humidity</div>
+                {sensorConfigs['Humidity'] && (
+                  <div className="text-xs text-gray-500 font-medium mt-1">
+                    Limit: {sensorConfigs['Humidity'].lowerThreshold}% ~ {sensorConfigs['Humidity'].upperThreshold}% ({formatSamplingRate(sensorConfigs['Humidity'])})
+                  </div>
+                )}
                 <div className="text-4xl font-bold my-5 text-primary">{activeSensors.humidity ? `${sensors.humidity}%` : '-'}</div>
-                <span className={`px-4 py-1.5 rounded-full text-xs font-medium text-white tracking-wide ${activeSensors.humidity ? 'bg-success' : 'bg-gray-400'}`}>{activeSensors.humidity ? 'Optimal' : 'Disabled'}</span>
+                <span className={`px-4 py-1.5 rounded-full text-xs font-medium text-white tracking-wide ${humStatus.bg}`}>{humStatus.text}</span>
               </div>
               <div className={`bg-light p-8 rounded-xl text-center transition-colors ${activeSensors.light ? 'hover:bg-gray-200' : 'opacity-40 grayscale pointer-events-none'}`}>
                 <div className="text-secondary mb-4"><i className="mdi mdi-white-balance-sunny text-5xl"></i></div>
                 <div className="text-lg font-semibold text-primary">Light Intensity</div>
+                {sensorConfigs['Light Intensity'] && (
+                  <div className="text-xs text-gray-500 font-medium mt-1">
+                    Limit: {sensorConfigs['Light Intensity'].lowerThreshold} ~ {sensorConfigs['Light Intensity'].upperThreshold} µmol/m²s ({formatSamplingRate(sensorConfigs['Light Intensity'])})
+                  </div>
+                )}
                 <div className="text-4xl font-bold my-5 text-primary">{activeSensors.light ? `${sensors.light} µmol/m²s` : '-'}</div>
-                <span className={`px-4 py-1.5 rounded-full text-xs font-medium text-white tracking-wide ${activeSensors.light ? 'bg-success' : 'bg-gray-400'}`}>{activeSensors.light ? 'Normal' : 'Disabled'}</span>
+                <span className={`px-4 py-1.5 rounded-full text-xs font-medium text-white tracking-wide ${lightStatus.bg}`}>{lightStatus.text}</span>
               </div>
             </div>
 
@@ -339,26 +1107,46 @@ export default function DashboardClient() {
               <div className={`bg-light p-5 rounded-lg text-center transition-colors ${activeSensors.co2 ? 'hover:bg-gray-200' : 'opacity-40 grayscale pointer-events-none'}`}>
                 <div className="text-secondary mb-2"><i className="mdi mdi-molecule-co2 text-4xl"></i></div>
                 <div className="text-sm font-semibold text-gray-700">Carbon Dioxide</div>
+                {sensorConfigs['Carbon Dioxide'] && (
+                  <div className="text-[11px] text-gray-500 mt-0.5">
+                    Limit: {sensorConfigs['Carbon Dioxide'].lowerThreshold} ~ {sensorConfigs['Carbon Dioxide'].upperThreshold} ppm ({formatSamplingRate(sensorConfigs['Carbon Dioxide'])})
+                  </div>
+                )}
                 <div className="text-2xl font-bold my-3 text-primary">{activeSensors.co2 ? `${sensors.co2} ppm` : '-'}</div>
-                <span className={`px-3 py-1 rounded-full text-xs font-medium text-white ${activeSensors.co2 ? 'bg-success' : 'bg-gray-400'}`}>{activeSensors.co2 ? 'Optimal' : 'Disabled'}</span>
+                <span className={`px-3 py-1 rounded-full text-xs font-medium text-white ${co2Status.bg}`}>{co2Status.text}</span>
               </div>
               <div className={`bg-light p-5 rounded-lg text-center transition-colors ${activeSensors.ph ? 'hover:bg-gray-200' : 'opacity-40 grayscale pointer-events-none'}`}>
                 <div className="text-secondary mb-2"><i className="mdi mdi-flask text-4xl"></i></div>
                 <div className="text-sm font-semibold text-gray-700">Hydrogen Ion Concentration</div>
+                {sensorConfigs['Hydrogen Ion Concentration'] && (
+                  <div className="text-[11px] text-gray-500 mt-0.5">
+                    Limit: {sensorConfigs['Hydrogen Ion Concentration'].lowerThreshold} ~ {sensorConfigs['Hydrogen Ion Concentration'].upperThreshold} pH ({formatSamplingRate(sensorConfigs['Hydrogen Ion Concentration'])})
+                  </div>
+                )}
                 <div className="text-2xl font-bold my-3 text-primary">{activeSensors.ph ? sensors.ph.toFixed(1) : '-'}</div>
-                <span className={`px-3 py-1 rounded-full text-xs font-medium text-white ${activeSensors.ph ? 'bg-success' : 'bg-gray-400'}`}>{activeSensors.ph ? 'Optimal' : 'Disabled'}</span>
+                <span className={`px-3 py-1 rounded-full text-xs font-medium text-white ${phStatus.bg}`}>{phStatus.text}</span>
               </div>
               <div className={`bg-light p-5 rounded-lg text-center transition-colors ${activeSensors.ec ? 'hover:bg-gray-200' : 'opacity-40 grayscale pointer-events-none'}`}>
                 <div className="text-secondary mb-2"><i className="mdi mdi-lightning-bolt text-4xl"></i></div>
                 <div className="text-sm font-semibold text-gray-700">Electrical Conductivity</div>
+                {sensorConfigs['Electrical Conductivity'] && (
+                  <div className="text-[11px] text-gray-500 mt-0.5">
+                    Limit: {sensorConfigs['Electrical Conductivity'].lowerThreshold} ~ {sensorConfigs['Electrical Conductivity'].upperThreshold} dS/m ({formatSamplingRate(sensorConfigs['Electrical Conductivity'])})
+                  </div>
+                )}
                 <div className="text-2xl font-bold my-3 text-primary">{activeSensors.ec ? `${sensors.ec.toFixed(1)} dS/m` : '-'}</div>
-                <span className={`px-3 py-1 rounded-full text-xs font-medium text-white ${activeSensors.ec ? 'bg-success' : 'bg-gray-400'}`}>{activeSensors.ec ? 'Optimal' : 'Disabled'}</span>
+                <span className={`px-3 py-1 rounded-full text-xs font-medium text-white ${ecStatus.bg}`}>{ecStatus.text}</span>
               </div>
               <div className={`bg-light p-5 rounded-lg text-center transition-colors ${activeSensors.do ? 'hover:bg-gray-200' : 'opacity-40 grayscale pointer-events-none'}`}>
                 <div className="text-secondary mb-2"><i className="mdi mdi-chart-bubble text-4xl"></i></div>
                 <div className="text-sm font-semibold text-gray-700">Dissolved Oxygen</div>
+                {sensorConfigs['Dissolved Oxygen'] && (
+                  <div className="text-[11px] text-gray-500 mt-0.5">
+                    Limit: {sensorConfigs['Dissolved Oxygen'].lowerThreshold} ~ {sensorConfigs['Dissolved Oxygen'].upperThreshold} mg/L ({formatSamplingRate(sensorConfigs['Dissolved Oxygen'])})
+                  </div>
+                )}
                 <div className="text-2xl font-bold my-3 text-primary">{activeSensors.do ? `${sensors.do.toFixed(1)} mg/L` : '-'}</div>
-                <span className={`px-3 py-1 rounded-full text-xs font-medium text-white ${activeSensors.do ? 'bg-success' : 'bg-gray-400'}`}>{activeSensors.do ? 'Optimal' : 'Disabled'}</span>
+                <span className={`px-3 py-1 rounded-full text-xs font-medium text-white ${doStatus.bg}`}>{doStatus.text}</span>
               </div>
             </div>
           </div>
@@ -474,6 +1262,209 @@ export default function DashboardClient() {
         </div>
       )}
 
+      {/* Arduino Setting Tab */}
+      {currentTab === 'arduino' && (
+        <div className="animate-[fadeIn_0.5s_ease-in-out]">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-semibold text-primary">Arduino Setting</h2>
+          </div>
+          
+          <div className="bg-white rounded-xl p-8 shadow-[0_4px_12px_rgba(0,0,0,0.05)] border-t-4 border-primary">
+            <h3 className="text-lg font-semibold text-primary mb-6 flex items-center gap-2"><CircuitBoard size={24} /> Select Arduino Board</h3>
+            
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* Arduino UNO R3 */}
+              <label className={`relative flex flex-col p-6 cursor-pointer rounded-xl border-2 transition-all duration-300 ${selectedArduinoBoard === 'Arduino UNO R3' ? 'border-secondary bg-secondary/5' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}>
+                <input type="radio" name="arduino_board" value="Arduino UNO R3" className="absolute opacity-0" checked={selectedArduinoBoard === 'Arduino UNO R3'} onChange={(e) => setSelectedArduinoBoard(e.target.value)} />
+                <div className="flex justify-between items-center mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${selectedArduinoBoard === 'Arduino UNO R3' ? 'border-secondary' : 'border-gray-300'}`}>
+                      {selectedArduinoBoard === 'Arduino UNO R3' && <div className="w-2.5 h-2.5 rounded-full bg-secondary"></div>}
+                    </div>
+                    <span className="font-bold text-lg text-gray-800">Arduino UNO R3</span>
+                  </div>
+                  <CircuitBoard className={`w-8 h-8 ${selectedArduinoBoard === 'Arduino UNO R3' ? 'text-secondary' : 'text-gray-400'}`} />
+                </div>
+                <p className="text-gray-600 text-sm pl-8">Standard Arduino board without built-in WiFi. Requires external modules for network connectivity.</p>
+              </label>
+
+              {/* Arduino UNO R4 WiFi */}
+              <label className={`relative flex flex-col p-6 cursor-pointer rounded-xl border-2 transition-all duration-300 ${selectedArduinoBoard === 'Arduino UNO R4 WiFi' ? 'border-secondary bg-secondary/5' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}>
+                <input type="radio" name="arduino_board" value="Arduino UNO R4 WiFi" className="absolute opacity-0" checked={selectedArduinoBoard === 'Arduino UNO R4 WiFi'} onChange={(e) => setSelectedArduinoBoard(e.target.value)} />
+                <div className="flex justify-between items-center mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${selectedArduinoBoard === 'Arduino UNO R4 WiFi' ? 'border-secondary' : 'border-gray-300'}`}>
+                      {selectedArduinoBoard === 'Arduino UNO R4 WiFi' && <div className="w-2.5 h-2.5 rounded-full bg-secondary"></div>}
+                    </div>
+                    <span className="font-bold text-lg text-gray-800">Arduino UNO R4 WiFi</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Wifi className={`w-5 h-5 ${selectedArduinoBoard === 'Arduino UNO R4 WiFi' ? 'text-secondary' : 'text-gray-400'}`} />
+                    <CircuitBoard className={`w-8 h-8 ${selectedArduinoBoard === 'Arduino UNO R4 WiFi' ? 'text-secondary' : 'text-gray-400'}`} />
+                  </div>
+                </div>
+                <p className="text-gray-600 text-sm pl-8">Next-generation board with 32-bit ARM Cortex-M4 and built-in ESP32-S3 for WiFi/Bluetooth connectivity.</p>
+              </label>
+            </div>
+
+            {/* Network & MQTT Configuration */}
+            {selectedArduinoBoard === 'Arduino UNO R4 WiFi' && (
+              <div className="mt-8 bg-gray-50 rounded-xl p-6 border border-gray-200">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-semibold text-primary flex items-center gap-2"><Wifi size={20} /> Network & MQTT Configuration</h3>
+                  <button onClick={handleSaveNetworkConfig} className="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm">
+                    Save Config
+                  </button>
+                </div>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">WiFi SSID</label>
+                    <input type="text" placeholder="Enter WiFi SSID" value={wifiSsid} onChange={e => setWifiSsid(e.target.value)} className="w-full p-2.5 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors bg-white" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">WiFi Password</label>
+                    <input type="password" placeholder="Enter WiFi Password" value={wifiPassword} onChange={e => setWifiPassword(e.target.value)} className="w-full p-2.5 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors bg-white" />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">MQTT Server URL</label>
+                    <input type="text" placeholder="e.g. mqtts://[your-cluster].hivemq.cloud:8883" value={mqttServer} onChange={e => setMqttServer(e.target.value)} className="w-full p-2.5 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors bg-white" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">MQTT Username</label>
+                    <input type="text" placeholder="Enter MQTT Username" value={mqttUsername} onChange={e => setMqttUsername(e.target.value)} className="w-full p-2.5 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors bg-white" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">MQTT Password</label>
+                    <input type="password" placeholder="Enter MQTT Password" value={mqttPassword} onChange={e => setMqttPassword(e.target.value)} className="w-full p-2.5 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors bg-white" />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Pin Configuration Table */}
+            <div className="mt-10">
+              <div className="flex justify-between items-center mb-4 border-b pb-2">
+                <h3 className="text-lg font-semibold text-primary">Hardware Pin Configuration</h3>
+                <button onClick={handleSaveHardwareConfig} className="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm">
+                  Save Config
+                </button>
+              </div>
+              {/* 드롭다운 메뉴가 잘리지 않도록 하단 여백(pb-20) 추가 */}
+              <div className="overflow-x-auto rounded-xl border border-gray-200 pb-20">
+                <table className="w-full text-left border-collapse bg-white">
+                  <thead>
+                    <tr className="bg-light text-primary border-b border-gray-200">
+                      <th className="p-4 font-semibold w-[120px]">Pin</th>
+                      <th className="p-4 font-semibold w-[25%]">Function Description</th>
+                      <th className="p-4 font-semibold w-[20%]">Sensors & Equipments</th>
+                      <th className="p-4 font-semibold w-[20%]">MQTT Topic</th>
+                      <th className="p-4 font-semibold">Connected Device(s)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ARDUINO_PINS.map(pin => {
+                      const count = pin.isI2C ? (pinCounts[pin.id] || 1) : 1;
+                      return (
+                        <React.Fragment key={pin.id}>
+                          {Array.from({ length: count }).map((_, i) => (
+                            <tr key={`${pin.id}-${i}`} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                              {i === 0 && (
+                                <td rowSpan={count} className="p-4 font-bold text-gray-700 bg-gray-50/50 align-top">
+                                  {pin.name}
+                                </td>
+                              )}
+                              {i === 0 && (
+                                <td rowSpan={count} className="p-4 text-sm text-gray-600 align-top">
+                                  {selectedArduinoBoard === 'Arduino UNO R3' ? pin.r3 : pin.r4}
+                                  {pin.isI2C && (
+                                    <div className="mt-3 flex flex-col gap-1">
+                                      <span className="text-xs text-gray-500 font-medium">Number of Devices:</span>
+                                      <select className="border border-gray-300 rounded px-2 py-1.5 text-sm outline-none focus:border-secondary transition-colors w-[80px] bg-white" value={count} onChange={(e) => setPinCounts(prev => ({ ...prev, [pin.id]: parseInt(e.target.value) }))}>
+                                        {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}</option>)}
+                                      </select>
+                                    </div>
+                                  )}
+                                </td>
+                              )}
+                              <td className="p-4 align-top">
+                                <MultiSelectDropdown options={mappingOptions} selected={pinMappings[pin.id]?.[i] || ['custom']} onChange={(vals) => handlePinMappingChange(pin.id, i, vals)} />
+                              </td>
+                              <td className="p-4 align-top">
+                                <div className="flex flex-col gap-1 w-full bg-gray-50/50 p-1.5 rounded-lg border border-gray-100">
+                                  {(pinMappings[pin.id]?.[i] || ['custom']).map((mapping, tIdx) => (
+                                    <input key={tIdx} type="text" placeholder={`Topic for ${mapping}`} value={pinMqttTopics[pin.id]?.[i]?.[tIdx] || ''} onChange={(e) => handlePinMqttTopicChange(pin.id, i, tIdx, e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-1 focus:ring-secondary outline-none text-xs transition-all bg-white" />
+                                  ))}
+                                </div>
+                              </td>
+                              <td className="p-4 align-top">
+                                <input type="text" placeholder={pin.isI2C ? `I2C Device ${i + 1} (e.g. LCD)` : `e.g. DHT22 Sensor`} value={pinConfigs[pin.id]?.[i] || ''} onChange={(e) => handlePinDeviceChange(pin.id, i, e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-1 focus:ring-secondary outline-none text-sm transition-all" />
+                              </td>
+                            </tr>
+                          ))}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              
+              {/* Code Generation Button */}
+              <div className="mt-6 flex justify-end">
+                <button onClick={handleGenerateCode} className="flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-6 py-3 rounded-lg font-medium transition-all shadow-md">
+                  <Code size={20} /> Generate Arduino Sketch
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Raspberry Setting Tab */}
+      {currentTab === 'raspberry' && (
+        <div className="animate-[fadeIn_0.5s_ease-in-out]">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-semibold text-primary">Raspberry Pi Data Logger</h2>
+          </div>
+          
+          <div className="grid md:grid-cols-2 gap-6">
+            {/* 원격 프로세스 제어 패널 */}
+            <div className="bg-white rounded-xl p-8 shadow-[0_4px_12px_rgba(0,0,0,0.05)] border-t-4 border-secondary flex flex-col justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-primary mb-4 flex items-center gap-2"><Server size={24} /> Remote Logger Control</h3>
+                <p className="text-gray-600 text-sm mb-6">
+                  Start or stop the <code>data-logger.py</code> process running on your Raspberry Pi remotely from anywhere.
+                </p>
+              </div>
+              <div className="bg-gray-50 p-6 rounded-lg border border-gray-200 flex justify-between items-center">
+                <span className="font-medium text-gray-700">Logger Process Status</span>
+                <EquipmentItem name="" icon="" details="" description="" isOn={remoteLoggerRunning} onToggle={handleToggleRemoteLogger} isActive={true} />
+              </div>
+              
+              <div className="mt-6 pt-4 border-t border-gray-200">
+                <p className="text-xs text-gray-500 mb-3 font-medium">To enable remote control, the Agent script must be running on your Raspberry Pi.</p>
+                <button onClick={handleGenerateAgentCode} className="w-full flex justify-center items-center gap-2 bg-secondary hover:bg-secondary/90 text-white px-4 py-2.5 rounded-lg font-medium transition-all shadow-sm text-sm">
+                  <Terminal size={18} /> Generate agent.py
+                </button>
+              </div>
+            </div>
+
+            {/* 코드 생성 패널 */}
+            <div className="bg-white rounded-xl p-8 shadow-[0_4px_12px_rgba(0,0,0,0.05)] border-t-4 border-primary">
+              <h3 className="text-lg font-semibold text-primary mb-4 flex items-center gap-2"><Terminal size={24} /> Python Edge Logger Setup</h3>
+              <p className="text-gray-600 text-sm mb-6">
+                Generate the <code>data-logger.py</code> script configured with your current MQTT and Supabase settings to deploy on your Raspberry Pi.
+              </p>
+              
+              <div className="flex justify-start">
+                <button onClick={handleGeneratePythonCode} className="w-full flex justify-center items-center gap-2 bg-primary hover:bg-primary/90 text-white px-6 py-3 rounded-lg font-medium transition-all shadow-md">
+                  <Code size={20} /> Generate Python Code
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* User / Login Tab */}
       {currentTab === 'users' && (
         <div className="flex flex-col items-center justify-center py-20">
@@ -553,12 +1544,14 @@ export default function DashboardClient() {
             
             <div className="mb-4">
               <label className="block mb-2 font-medium text-primary">Sensor Sampling Rate</label>
-              <select className="w-full p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" value={configRate} onChange={e => setConfigRate(e.target.value)}>
-                <option value="10">10 seconds</option>
-                <option value="30">30 seconds</option>
-                <option value="60">1 minute</option>
-                <option value="300">5 minutes</option>
-              </select>
+              <div className="flex gap-2">
+                <input type="number" min="1" step="any" className="flex-1 p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" placeholder="Enter value" value={configRateValue} onChange={e => setConfigRateValue(e.target.value)} />
+                <select className="w-[140px] p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" value={configRateUnit} onChange={e => setConfigRateUnit(e.target.value)}>
+                  <option value="second">Second(s)</option>
+                  <option value="minute">Minute(s)</option>
+                  <option value="hour">Hour(s)</option>
+                </select>
+              </div>
             </div>
             
             <div className="mb-4">
@@ -605,7 +1598,7 @@ export default function DashboardClient() {
                 <thead>
                   <tr className="bg-light text-primary border-b-2 border-gray-200">
                     <th className="p-3 text-left font-semibold">Sensor Type</th>
-                    <th className="p-3 text-left font-semibold">Sampling Rate (s)</th>
+                    <th className="p-3 text-left font-semibold">Sampling Rate</th>
                     <th className="p-3 text-left font-semibold">Lower Limit</th>
                     <th className="p-3 text-left font-semibold">Upper Limit</th>
                     <th className="p-3 text-left font-semibold">Last Updated</th>
@@ -619,7 +1612,7 @@ export default function DashboardClient() {
                         <td colSpan={4} className="p-3 text-gray-400 text-center italic">N/A</td>
                       ) : (
                         <>
-                          <td className="p-3 text-gray-600">{c.samplingRate}</td>
+                          <td className="p-3 text-gray-600">{c.samplingRateValue ? `${c.samplingRateValue} ${c.samplingRateUnit}${c.samplingRateValue > 1 ? 's' : ''}` : `${c.samplingRate} sec`}</td>
                           <td className="p-3 text-gray-600">{c.lowerThreshold}</td>
                           <td className="p-3 text-gray-600">{c.upperThreshold}</td>
                           <td className="p-3 text-gray-500 text-sm">{new Date(c.lastUpdated).toLocaleString()}</td>
@@ -631,6 +1624,116 @@ export default function DashboardClient() {
               </table>
             </div>
             <button onClick={() => setIsLoadModalOpen(false)} className="w-full mt-6 bg-light text-dark font-medium p-3 rounded-lg hover:bg-gray-200 transition-colors">Close</button>
+          </div>
+        </div>
+      )}
+
+      {/* 4단계: Generated Code Modal (Arduino) */}
+      {isCodeModalOpen && (
+        <div className="fixed inset-0 bg-black/60 flex justify-center items-center z-[1000] animate-in fade-in duration-200">
+          <div className="bg-white p-8 rounded-xl w-[90%] max-w-[800px] max-h-[90vh] flex flex-col shadow-2xl border-t-4 border-secondary">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-2xl font-semibold text-primary flex items-center gap-2"><Code size={24} /> Generated Sketch</h3>
+              <button onClick={() => setIsCodeModalOpen(false)} className="text-gray-400 hover:text-gray-600 transition-colors"><X size={24} /></button>
+            </div>
+            
+            <div className="flex-1 flex flex-col bg-gray-900 rounded-lg p-4 mb-6 min-h-[400px]">
+              <textarea 
+                className="w-full flex-1 bg-transparent text-green-400 font-mono text-sm outline-none resize-none whitespace-pre overflow-auto"
+                value={generatedCode}
+                onChange={(e) => setGeneratedCode(e.target.value)}
+                spellCheck={false}
+              />
+            </div>
+
+            <div className="flex gap-4">
+              <button onClick={() => { navigator.clipboard.writeText(generatedCode); showNotification('Code copied to clipboard!', 'success'); }} className="flex-1 flex items-center justify-center gap-2 bg-light hover:bg-gray-200 text-gray-800 p-3 rounded-lg font-medium transition-colors border border-gray-300">
+                <Copy size={20} /> Copy Code
+              </button>
+              <button onClick={() => {
+              const blob = new Blob([generatedCode], { type: 'text/plain' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a'); a.href = url; a.download = 'smart_farm_node.ino'; a.click(); URL.revokeObjectURL(url);
+              showNotification('Downloading .ino file...', 'success');
+              }} className="flex-1 flex items-center justify-center gap-2 bg-secondary hover:bg-secondary/90 text-white p-3 rounded-lg font-medium transition-colors">
+              <Download size={20} /> Download .ino File
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Generated Python Code Modal */}
+      {isPythonModalOpen && (
+        <div className="fixed inset-0 bg-black/60 flex justify-center items-center z-[1000] animate-in fade-in duration-200">
+          <div className="bg-white p-8 rounded-xl w-[90%] max-w-[800px] max-h-[90vh] flex flex-col shadow-2xl border-t-4 border-info">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-2xl font-semibold text-primary flex items-center gap-2"><Terminal size={24} /> data-logger.py</h3>
+              <button onClick={() => setIsPythonModalOpen(false)} className="text-gray-400 hover:text-gray-600 transition-colors"><X size={24} /></button>
+            </div>
+            
+            <div className="flex-1 flex flex-col bg-gray-900 rounded-lg p-4 mb-6 min-h-[400px]">
+              <textarea 
+                className="w-full flex-1 bg-transparent text-blue-400 font-mono text-sm outline-none resize-none whitespace-pre overflow-auto"
+                value={generatedPythonCode}
+                onChange={(e) => setGeneratedPythonCode(e.target.value)}
+                spellCheck={false}
+              />
+            </div>
+
+            <div className="flex gap-4">
+              <button onClick={() => { navigator.clipboard.writeText(generatedPythonCode); showNotification('Python script copied!', 'success'); }} className="flex-1 flex items-center justify-center gap-2 bg-light hover:bg-gray-200 text-gray-800 p-3 rounded-lg font-medium transition-colors border border-gray-300">
+                <Copy size={20} /> Copy Code
+              </button>
+              <button onClick={() => {
+                const blob = new Blob([generatedPythonCode], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url; a.download = 'data-logger.py'; a.click(); URL.revokeObjectURL(url);
+              }} className="flex-1 flex items-center justify-center gap-2 bg-info hover:bg-info/90 text-white p-3 rounded-lg font-medium transition-colors">
+                <Download size={20} /> Download .py File
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Generated Agent Code Modal */}
+      {isAgentModalOpen && (
+        <div className="fixed inset-0 bg-black/60 flex justify-center items-center z-[1000] animate-in fade-in duration-200">
+          <div className="bg-white p-8 rounded-xl w-[90%] max-w-[800px] max-h-[90vh] flex flex-col shadow-2xl border-t-4 border-secondary">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-2xl font-semibold text-primary flex items-center gap-2"><Terminal size={24} /> agent.py (Remote Controller)</h3>
+              <button onClick={() => setIsAgentModalOpen(false)} className="text-gray-400 hover:text-gray-600 transition-colors"><X size={24} /></button>
+            </div>
+            
+            <div className="mb-4 text-sm text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-200">
+              <strong>💡 How to run on Raspberry Pi:</strong><br/>
+              1. Download both <code className="bg-white px-1">data-logger.py</code> and <code className="bg-white px-1">agent.py</code> to the same folder.<br/>
+              2. Install dependencies: <code className="bg-white px-1">pip install supabase</code><br/>
+              3. Run the agent: <code className="bg-white px-1">python agent.py</code>
+            </div>
+
+            <div className="flex-1 flex flex-col bg-gray-900 rounded-lg p-4 mb-6 min-h-[300px]">
+              <textarea 
+                className="w-full flex-1 bg-transparent text-purple-400 font-mono text-sm outline-none resize-none whitespace-pre overflow-auto"
+                value={generatedAgentCode}
+                onChange={(e) => setGeneratedAgentCode(e.target.value)}
+                spellCheck={false}
+              />
+            </div>
+
+            <div className="flex gap-4">
+              <button onClick={() => { navigator.clipboard.writeText(generatedAgentCode); showNotification('Agent script copied!', 'success'); }} className="flex-1 flex items-center justify-center gap-2 bg-light hover:bg-gray-200 text-gray-800 p-3 rounded-lg font-medium transition-colors border border-gray-300">
+                <Copy size={20} /> Copy Code
+              </button>
+              <button onClick={() => {
+                const blob = new Blob([generatedAgentCode], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url; a.download = 'agent.py'; a.click(); URL.revokeObjectURL(url);
+              }} className="flex-1 flex items-center justify-center gap-2 bg-secondary hover:bg-secondary/90 text-white p-3 rounded-lg font-medium transition-colors">
+                <Download size={20} /> Download .py File
+              </button>
+            </div>
           </div>
         </div>
       )}
