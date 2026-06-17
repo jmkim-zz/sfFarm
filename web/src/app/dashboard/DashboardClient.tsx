@@ -641,46 +641,33 @@ export default function DashboardClient() {
   };
 
   // Raspberry Pi (Python) 코드 자동 생성 함수
-  const handleGeneratePythonCode = () => {
-    // URL에서 Host 부분만 추출
-    let parsedServer = mqttServer;
+  const handleGeneratePythonCode = async () => {
+    setIsGeneratingCode(true); // 로딩 상태 공유
+    showNotification('Loading Python logger script...', 'info');
     try {
-      const urlToParse = mqttServer.includes('://') ? mqttServer : `mqtts://${mqttServer}`;
-      parsedServer = new URL(urlToParse).hostname || mqttServer;
-    } catch(e) {}
-
-    const pythonCode = `import os
-import json
-import time
-import paho.mqtt.client as mqtt
-from supabase import create_client, Client
-
-# --- Auto-generated Configurations ---
-SUPABASE_URL = "${process.env.NEXT_PUBLIC_SUPABASE_URL || 'YOUR_SUPABASE_URL'}"
-SUPABASE_KEY = "YOUR_SUPABASE_SERVICE_ROLE_KEY" # Warning: Replace with your actual Service Role Key!
-
-MQTT_HOST = "${parsedServer}"
-MQTT_PORT = 8883
-MQTT_USERNAME = "${mqttUsername}"
-MQTT_PASSWORD = "${mqttPassword}"
-# -------------------------------------
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-def on_connect(client, userdata, flags, rc):
-    if rc == 0:
-        print(f"[MQTT] Connected successfully to {MQTT_HOST}")
-        client.subscribe("smartfarm/+/sensors")
-    else:
-        print(f"[MQTT] Connection failed with code {rc}")
-
-# ... (Data logging & DB Insert Logic will be placed here) ...
-
-print("Data Logger Agent is starting...")
-# client.loop_forever()
-`;
-    setGeneratedPythonCode(pythonCode);
-    setIsPythonModalOpen(true);
+      const response = await fetch('/api/get-python-logger');
+      if (!response.ok) {
+        const errorText = await response.text();
+        try {
+          const errorJson = JSON.parse(errorText);
+          throw new Error(errorJson.error || `Server error: ${response.status}`);
+        } catch (e) {
+          const shortError = errorText.substring(0, 500);
+          throw new Error(
+            `An unexpected server error occurred (Status: ${response.status}). Response: ${shortError}...`
+          );
+        }
+      }
+      const data = await response.json();
+      setGeneratedPythonCode(data.code);
+      setIsPythonModalOpen(true);
+      showNotification('Python script loaded successfully!', 'success');
+    } catch (error: any) {
+      console.error(error);
+      showNotification(error.message, 'error');
+    } finally {
+      setIsGeneratingCode(false);
+    }
   };
 
   // 파수꾼 에이전트(agent.py) 코드 자동 생성 함수
@@ -689,11 +676,27 @@ print("Data Logger Agent is starting...")
 import time
 import subprocess
 from supabase import create_client, Client
+from dotenv import load_dotenv
 
-# --- Auto-generated Configurations ---
-SUPABASE_URL = "${process.env.NEXT_PUBLIC_SUPABASE_URL || 'YOUR_SUPABASE_URL'}"
-SUPABASE_KEY = "YOUR_SUPABASE_SERVICE_ROLE_KEY" # Warning: Replace with your actual Service Role Key!
-# -------------------------------------
+# 1. 환경 변수 로드 (.env)
+load_dotenv()
+
+# ==============================================================================
+# ⚠️ [사용자 환경 설정 - 필수 수정 항목] ⚠️
+# 라즈베리파이 등 배포하는 환경에 맞게 .env 파일을 생성하여 변수를 선언하거나,
+# 아래 os.getenv(...) 부분을 지우고 "자신의_실제_문자열_값"으로 직접 덮어쓰세요.
+# ==============================================================================
+
+# 1. Supabase 설정
+# SUPABASE_URL: Supabase 프로젝트 URL (예: "https://xxxx.supabase.co")
+# SUPABASE_KEY: Supabase Service Role Key (보안 주의: 절대 외부에 노출하지 마세요)
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("[오류] Supabase 설정이 누락되었습니다. 코드를 직접 수정하거나 .env를 설정하세요.")
+
+# ==============================================================================
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 logger_process = None
@@ -1266,8 +1269,12 @@ while True:
               </p>
               
               <div className="flex justify-start">
-                <button onClick={handleGeneratePythonCode} className="w-full flex justify-center items-center gap-2 bg-primary hover:bg-primary/90 text-white px-6 py-3 rounded-lg font-medium transition-all shadow-md">
-                  <Code size={20} /> Generate Python Code
+                <button onClick={handleGeneratePythonCode} disabled={isGeneratingCode} className={`w-full flex justify-center items-center gap-2 bg-primary hover:bg-primary/90 text-white px-6 py-3 rounded-lg font-medium transition-all shadow-md ${isGeneratingCode ? 'bg-gray-400 cursor-not-allowed' : ''}`}>
+                  {isGeneratingCode ? (
+                    <><div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" /> Loading...</>
+                  ) : (
+                    <><Code size={20} /> Generate Python Code</>
+                  )}
                 </button>
               </div>
             </div>
@@ -1519,7 +1526,7 @@ while True:
             <div className="mb-4 text-sm text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-200">
               <strong>💡 How to run on Raspberry Pi:</strong><br/>
               1. Download both <code className="bg-white px-1">data-logger.py</code> and <code className="bg-white px-1">agent.py</code> to the same folder.<br/>
-              2. Install dependencies: <code className="bg-white px-1">pip install supabase</code><br/>
+              2. Install dependencies: <code className="bg-white px-1">pip install supabase python-dotenv paho-mqtt</code><br/>
               3. Run the agent: <code className="bg-white px-1">python agent.py</code>
             </div>
 
