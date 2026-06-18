@@ -1,80 +1,109 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// Gemini API Key 로드
-const apiKey = process.env.GEMINI_API_KEY || '';
-const genAI = new GoogleGenerativeAI(apiKey);
-
-export async function POST(req: Request) {
+export async function POST(request: Request) {
   try {
-    const payload = await req.json();
+    const body = await request.json();
+    const apiKey = body.geminiApiKey || process.env.GEMINI_API_KEY;
 
     if (!apiKey) {
-      return NextResponse.json(
-        { error: '서버에 GEMINI_API_KEY 환경 변수가 설정되지 않았습니다.' },
-        { status: 500 }
-      );
+      throw new Error('GEMINI_API_KEY is not configured. Please set it in System Settings or environment variables.');
     }
 
-    // [핵심 요구사항] 모델 초기화 시 System Instruction으로 펌웨어 작성 규칙 주입
-    const systemInstruction = `당신은 아두이노(C++) 펌웨어 개발 전문가입니다.
+    const genAI = new GoogleGenerativeAI(apiKey);
 
-[엄격한 펌웨어 작성 규칙]
+    const systemInstruction = `You are an expert C++ firmware developer for Arduino.
+Follow these strict rules:
 1. delay() 함수 사용을 절대 금지하며, 반드시 millis() 기반의 비동기 유한 상태 기계(FSM) 패턴으로 각 센서의 측정 주기를 제어할 것.
 2. I2C 센서 통신 오류 시 NaN 값을 필터링하는 방어 로직을 넣을 것.
-3. UART 통신 기기(예: Atlas EZO pH)는 데이터를 요청('R\\r')하기 직전에 반드시 while(Serial1.available()) Serial1.read();를 호출하여 수신 버퍼(Rx Buffer)를 Flush 할 것.
-4. [네트워크 강제] WiFiClientSecure.h 라이브러리는 절대 사용하지 말 것. 반드시 <WiFiS3.h>를 포함하고, 전역 객체로 WiFiSSLClient wifiClient;를 선언하여 MQTT 보안 포트(8883) 통신에 사용할 것.
-5. [MQTT 인증] mqttClient.connect() 함수 호출 시, NULL을 사용하지 말고 반드시 프론트엔드에서 전달받은 MQTT_USERNAME과 MQTT_PASSWORD 변수를 인자로 명시하여 연결 거부를 방지할 것.
-6. [I2C 공식 라이브러리] SCD41 센서 제어 시 Adafruit_SCD4x.h 대신 반드시 SensirionI2CScd4x.h 공식 라이브러리를 사용할 것.
-7. [UART 완전 비동기] UART 통신에서 Serial1.readStringUntil()과 같은 블로킹(Blocking) 함수 사용을 엄격히 금지할 것. 대신 if (Serial1.available()) 조건문 내부에서 char c = Serial1.read();를 통해 문자를 전역 String 버퍼에 하나씩 누적하고, c == '\\r' 조건이 만족될 때만 실수형(float)으로 파싱하는 상태 머신 구조를 작성할 것.
-8. [시뮬레이션 매크로 선언] 코드 최상단 설정부에 #define SIMULATION_MODE 1 // 1: 가상 데이터 테스트, 0: 실제 하드웨어 센서 매크로를 선언할 것.
-9. [가상 데이터 분기] 모든 센서 측정 루틴(SHT31, SCD41, TSL2591, Atlas pH 등) 내부에서 실제 센서 API 호출부는 #if SIMULATION_MODE == 0 으로 감싸고, #elif SIMULATION_MODE == 1 에서는 random() 함수를 사용해 스마트팜 유효 범위 내의 가상 데이터를 생성하여 할당할 것.
-   - 온도 (SHT31): 15.0 ~ 35.0 °C (예: random(150, 351) / 10.0)
-   - 습도 (SHT31): 40.0 ~ 90.0 % (예: random(400, 901) / 10.0)
-   - CO2 (SCD41): 400 ~ 1500 ppm (예: random(400, 1501))
-   - 조도 (TSL2591): 100 ~ 8000 lux (예: random(100, 8001))
-   - pH (Atlas EZO): 5.5 ~ 7.5 pH (예: random(55, 76) / 10.0)
-10. [비동기 구조 유지] 가상 데이터를 생성할 때에도 기존에 지시한 millis() 기반의 측정 주기(INTERVAL)와 완전 비동기 FSM 구조는 절대 훼손하지 말고 그대로 유지할 것 (UART pH 센서의 가상 응답 딜레이 모사 등).
-11. [Floating Pin 노이즈 방지] 시뮬레이션 모드 동작 시 UART RX 핀의 노이즈 유입을 막기 위해, UART 데이터를 읽어들이는 while(Serial1.available()) 루틴 전체를 반드시 #if SIMULATION_MODE == 0 블록으로 감싸 물리적 포트 접근을 원천 차단할 것.
-12. AI의 부연 설명 없이, 응답은 반드시 순수한 마크다운 C++ 코드 블록(\`\`\`cpp ... \`\`\`)으로만 반환할 것.`;
+3. UART 통신 기기(예: Atlas EZO pH) 수신 및 파싱 규칙:
+   - 데이터를 요청('R\\r')하기 직전에 반드시 \`while(Serial1.available()) Serial1.read();\`를 호출하여 수신 버퍼(Rx Buffer)를 Flush 할 것.
+   - 수신 문자를 버퍼에 누적할 때는 반드시 \`isPrintable()\`로 출력 가능한 문자인지 확인할 것.
+   - 응답 파싱 시 절대 \`startsWith("+")\`를 사용하지 말 것. EZO 회로는 \`1,7.00\` 또는 \`7.00\` 형식으로 응답하므로, 콤마(,)가 있으면 분리하거나 숫자 형태인지 검증 후 \`toFloat()\`로 직접 추출할 것.
+4. AI의 부연 설명 없이, 응답은 반드시 순수한 마크다운 C++ 코드 블록(\`\`\`cpp ... \`\`\`)으로만 반환할 것.
+5. [사용자 필수 요구사항] Arduino UNO R4 WiFi의 내장 LED 매트릭스(Arduino_LED_Matrix)를 이용하여 통신 상태를 표시할 것:
+   - WiFi 연결 시: 좌측 상단 2x2 크기로 LED ON (파란색 개념)
+   - WiFi 해제 시: 좌측 상단 1x1 크기로 LED ON (빨간색 개념)
+   - MQTT 연결 시: 우측 하단 2x2 크기로 LED ON (파란색 개념)
+   - MQTT 해제 시: 우측 하단 1x1 크기로 LED ON (빨간색 개념)
+   (주의 1: UNO R4 WiFi의 매트릭스는 물리적으로 단색(Red)이므로 컬러 제어는 불가함. AI는 색상 제어를 시도하지 말고, 오직 요구된 '위치'와 '크기'의 LED 픽셀 배열을 제어하여 상태를 정확히 구분하도록 코드를 작성할 것.)
+   (주의 2: Arduino_LED_Matrix 라이브러리에는 matrix.clear()나 matrix.drawPixel() 같은 함수가 없습니다. 특정 LED를 제어하려면 반드시 8행(Row) 12열(Col) 크기의 2차원 배열(예: \`byte frame[8][12]\`)을 선언하고 좌표값을 설정한 뒤, \`matrix.renderBitmap(frame, 8, 12)\`처럼 크기를 넘기지 말고 \`matrix.renderBitmap(frame);\`과 같이 2차원 배열 포인터(이름) 하나만 전달하여 매트릭스에 덮어씌울 것.)
+6. MQTT 클라이언트 라이브러리: \`ArduinoMqttClient\` 대신, 직관적이고 실무에서 널리 쓰이는 \`PubSubClient.h\` 라이브러리를 사용할 것.
+7. TSL2591 센서 조도 측정 시 주의사항:
+   - 객체 생성 시 \`Adafruit_TSL2591 tsl = Adafruit_TSL2591(2591);\` 형태로 생성하고 타이밍과 게인 설정은 반드시 \`setup()\` 내부에서 \`tsl.setGain()\`, \`tsl.setTiming()\`을 통해 지정할 것. (생성자에 직접 인자 전달 금지)
+   - \`tsl.getFullLuminosity(&lum_full, &lum_ir)\` 와 같은 포인터/참조 매개변수 방식은 해당 라이브러리에서 지원하지 않으므로 절대 사용 금지.
+   - 반드시 파라미터 없이 호출하여 32비트 반환값을 받은 후 비트 연산할 것. (예시: \`uint32_t lum = tsl.getFullLuminosity(); uint16_t ir = lum >> 16; uint16_t full = lum & 0xFFFF;\`)
+8. WiFi 및 MQTT 재연결 시 \`while (WiFi.status() != WL_CONNECTED)\` 등 스핀락(Spinlock) 블로킹 코드를 절대 작성하지 말고, 연결이 안 되었으면 즉시 \`return\` 하여 완전한 논블로킹으로 구현할 것.
+9. Arduino UNO R4 WiFi의 통신 라이브러리 주의사항:
+   - ESP 계열의 \`<WiFi.h>\`, \`<WiFiClientSecure.h>\`, \`<WiFiSSLClient.h>\` 헤더를 절대 포함(include)하지 말 것. UNO R4 WiFi 전용 네트워킹 라이브러리인 반드시 \`#include <WiFiS3.h>\` 만 포함할 것. (\`<WiFiS3.h>\` 내부에 SSL 클라이언트 기능이 있으므로 객체는 \`WiFiSSLClient wifiClient;\` 형태로 생성 가능함)
+   - \`setInsecure()\` 메서드를 지원하지 않으므로 코드 어디에도 절대 작성하지 말 것.
+10. SCD41 센서 라이브러리: \`<Adafruit_SCD4X.h>\` 대신 반드시 제조사 공식 라이브러리인 \`<SensirionI2CScd4x.h>\`를 사용할 것.
+11. 시뮬레이션 모드(TDD) 및 하드웨어 격리 (가장 중요):
+   - 코드 최상단에 \`#define SIMULATION_MODE 1\` 매크로를 선언할 것.
+   - \`SIMULATION_MODE == 1\`일 때는 Floating 핀 노이즈 영향을 받지 않도록 \`Serial1.available()\` 등 실제 물리 하드웨어 핀이나 통신을 읽는 코드가 절대 실행되지 않게 \`#if SIMULATION_MODE == 0\` ... \`#else\` ... \`#endif\` 전처리기 지시어로 철저하게 격리할 것.
+   - 시뮬레이션 모드에서는 하드웨어 응답(UART 수신 대기 등)을 기다리는 로직 없이, 곧바로 Random 값을 생성하여 FSM 상태를 전이시키고 MQTT로 발행할 것.`;
 
-    const prompt = `다음 하드웨어 설정 정보를 바탕으로 아두이노 스케치(.ino) 코드를 작성하세요.\n\n${JSON.stringify(payload, null, 2)}`;
+    // 프론트엔드에서 넘어온 하드웨어 핀 및 네트워크 설정 Payload 전달
+    const prompt = `다음 하드웨어 및 네트워크 설정 정보를 바탕으로 스마트팜 아두이노 전체 스케치(.ino) 코드를 작성해 줘:\n\n${JSON.stringify(body, null, 2)}`;
 
-    // 모델 Fallback(자동 재시도) 리스트 지정
-    // 트래픽 분산과 고품질 코드 생성을 보장하기 위해 순차적으로 시도합니다.
-    const fallbackModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'];
+    // 접속 실패(404 등) 시 대비해 여러 모델로 순차적(Fallback) 재시도
+    const modelsToTry = [
+      'gemini-2.5-pro',
+      'gemini-2.5-flash',
+      'gemini-2.0-pro-exp-02-05',
+      'gemini-2.0-flash',
+      'gemini-2.0-flash-lite-preview-02-05',
+      'gemini-1.5-pro-latest',
+      'gemini-1.5-pro',
+      'gemini-1.5-flash-latest',
+      'gemini-1.5-flash',
+      'gemini-1.5-flash-8b',
+      'gemini-pro'
+    ];
     let code = '';
-    let lastError: any = null;
+    const errors: string[] = [];
 
-    for (const modelName of fallbackModels) {
+    for (const modelName of modelsToTry) {
       try {
-        console.log(`[Gemini API] 코드 생성 요청 시도 중... (모델: ${modelName})`);
+        console.log(`[Generate Sketch API] Trying model: ${modelName}`);
         const model = genAI.getGenerativeModel({
           model: modelName,
-          systemInstruction: systemInstruction,
+          systemInstruction: systemInstruction
         });
 
         const result = await model.generateContent(prompt);
-        code = result.response.text();
-        
-        // 렌더링을 위해 마크다운 코드블록 백틱(```cpp, ```) 제거
-        code = code.replace(/^```(cpp|c\+\+)?\n/i, '').replace(/```$/i, '').trim();
-        
-        // 성공하면 다음 모델로 넘어가지 않고 즉시 종료합니다.
-        break;
+        const response = await result.response;
+        code = response.text() || '';
+        break; // 성공 시 루프 종료
       } catch (error: any) {
-        console.error(`[Gemini API Error - ${modelName} 실패]:`, error.message);
-        lastError = error;
+        console.warn(`[Generate Sketch API] Model ${modelName} failed:`, error.message);
+        // 에러가 너무 길어지지 않게 첫 줄만 수집
+        errors.push(`[${modelName}] ${(error.message || 'Unknown').split('\n')[0]}`);
       }
     }
 
     if (!code) {
-      throw new Error(`모든 모델 호출에 실패했습니다. 마지막 서버 에러: ${lastError?.message}`);
+      const combinedErrors = errors.join(' | ');
+      if (combinedErrors.includes('429') || combinedErrors.includes('Quota')) {
+        throw new Error('Gemini API 호출 한도(Rate Limit 또는 Quota)를 초과했습니다. 잠시 후 다시 시도해 주세요.\n(상세: ' + combinedErrors + ')');
+      }
+      throw new Error(`모든 모델에서 코드 생성에 실패했습니다. 상세 오류: ${combinedErrors}`);
+    }
+
+    // AI가 규칙을 무시하고 텍스트를 덧붙였을 경우를 대비해 순수 코드 블록만 추출
+    const match = code.match(/```(?:cpp|c)?\n([\s\S]*?)```/);
+    if (match && match[1]) {
+      code = match[1].trim();
+    } else {
+      code = code.replace(/^```(cpp|c)?\n/, '').replace(/```$/, '').trim();
     }
 
     return NextResponse.json({ code });
   } catch (error: any) {
-    console.error('[Gemini API Error]:', error);
-    return NextResponse.json({ error: error.message || '코드 생성 중 오류가 발생했습니다.' }, { status: 500 });
+    console.error('[Generate Sketch API] Error:', error);
+    return NextResponse.json(
+      { error: error.message || 'Failed to generate Arduino sketch code.' },
+      { status: 500 }
+    );
   }
 }

@@ -3,7 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Tractor, Gauge, Cpu, Settings2, Wrench, FileText, Settings, Users, Server, CircuitBoard } from 'lucide-react';
+import { Tractor, Gauge, Cpu, Settings2, Wrench, FileText, Settings, Users, Server, CircuitBoard, Home } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 
 export default function Sidebar() {
@@ -20,6 +20,12 @@ export default function Sidebar() {
   }, []);
 
   const navSections = [
+    {
+      title: 'Home',
+      items: [
+        { id: 'home', label: 'Home', icon: Home },
+      ]
+    },
     {
       title: 'Monitoring',
       items: [
@@ -41,7 +47,12 @@ export default function Sidebar() {
         { id: 'settings', label: 'System Settings', icon: Settings },
         { id: 'raspberry', label: 'Raspberry Setting', icon: Server },
         { id: 'arduino', label: 'Arduino Setting', icon: CircuitBoard },
-        { id: 'users', label: session ? 'Profile' : 'Log in', icon: Users },
+      ]
+    },
+    {
+      title: 'Account',
+      items: [
+        { id: 'users', label: session ? 'Profile' : 'Log In', icon: Users },
       ]
     }
   ];

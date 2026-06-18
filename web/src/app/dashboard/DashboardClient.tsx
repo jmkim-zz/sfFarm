@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { LayoutGrid, Play, Square, FolderOpen, SlidersHorizontal, CheckCircle, AlertTriangle, XCircle, Info, X, Cpu, Settings2, Users, CircuitBoard, Wifi, Copy, Download, Code, Server, Terminal } from 'lucide-react';
+import { LayoutGrid, Play, Square, FolderOpen, SlidersHorizontal, CheckCircle, AlertTriangle, XCircle, Info, X, Cpu, Settings2, Users, CircuitBoard, Wifi, Copy, Download, Code, Server, Terminal, Database, Key, Cloud, FileCode2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase/client';
 
 // 알림(Notification) 타입을 정의하고 관리하는 커스텀 훅
@@ -11,20 +11,28 @@ interface NotificationItem { id: number; message: string; type: NotificationType
 
 function useNotification() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  
+  const removeNotification = (id: number) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+  };
+
   const showNotification = (message: string, type: NotificationType = 'info') => {
     const id = Date.now();
     setNotifications(prev => [...prev, { id, message, type }]);
-    // 5초 뒤에 알림 자동 삭제
-    setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 5000);
+    
+    // 에러(error) 타입인 경우 자동 삭제를 하지 않고 사용자가 직접 닫도록 유지합니다.
+    if (type !== 'error') {
+      setTimeout(() => removeNotification(id), 5000);
+    }
   };
-  return { notifications, showNotification };
+  return { notifications, showNotification, removeNotification };
 }
 
 // 장비 개별 항목을 렌더링하는 재사용 컴포넌트
 function EquipmentItem({ 
-  name, icon, details, description, isOn, onToggle, isActive = true
+  name, icon, details, description, isOn, onToggle, isActive = true, schedule
 }: { 
-  name: string, icon: string, details: string, description: string, isOn: boolean, onToggle: (state: boolean) => void, isActive?: boolean
+  name: string, icon: string, details: string, description: string, isOn: boolean, onToggle: (state: boolean) => void, isActive?: boolean, schedule?: { start: string, stop: string }
 }) {
   return (
     <div className={`flex justify-between items-center p-5 bg-light rounded-xl transition-all ${isActive ? 'hover:bg-gray-200' : 'opacity-40 grayscale pointer-events-none'}`}>
@@ -35,17 +43,25 @@ function EquipmentItem({
         <p className="text-gray-500 text-sm mb-1">{details}</p>
         <p className="text-gray-500 text-sm">{description}</p>
       </div>
-      <div className="flex items-center gap-4">
-        <span className={`px-3 py-1 rounded-full text-xs font-medium text-white transition-colors duration-300 ${!isActive ? 'bg-gray-400' : isOn ? 'bg-state-on' : 'bg-state-off'}`}>
-          {!isActive ? 'Disabled' : isOn ? 'On' : 'Off'}
-        </span>
-        {/* Tailwind 기반 토글 스위치 디자인 */}
-        <label className="relative inline-block w-[50px] h-[24px]">
-          <input type="checkbox" className="opacity-0 w-0 h-0 peer" checked={isOn && isActive} disabled={!isActive} onChange={(e) => onToggle(e.target.checked)} />
-          <span className={`absolute cursor-pointer top-0 left-0 right-0 bottom-0 transition-[0.4s] rounded-[24px] ${!isActive ? 'bg-gray-300' : 'bg-[#ccc] peer-checked:bg-success'}
-            before:absolute before:content-[''] before:h-[16px] before:w-[16px] before:left-[4px] before:bottom-[4px] before:bg-white before:transition-[0.4s] before:rounded-full peer-checked:before:translate-x-[26px]`}>
+      <div className="flex flex-col items-end gap-2">
+        <div className="flex items-center gap-4">
+          <span className={`px-3 py-1 rounded-full text-xs font-medium text-white transition-colors duration-300 ${!isActive ? 'bg-gray-400' : isOn ? 'bg-state-on' : 'bg-state-off'}`}>
+            {!isActive ? 'Disabled' : isOn ? 'On' : 'Off'}
           </span>
-        </label>
+          {/* Tailwind 기반 토글 스위치 디자인 */}
+          <label className="relative inline-block w-[50px] h-[24px]">
+            <input type="checkbox" className="opacity-0 w-0 h-0 peer" checked={isOn && isActive} disabled={!isActive} onChange={(e) => onToggle(e.target.checked)} />
+            <span className={`absolute cursor-pointer top-0 left-0 right-0 bottom-0 transition-[0.4s] rounded-[24px] ${!isActive ? 'bg-gray-300' : 'bg-[#ccc] peer-checked:bg-success'}
+              before:absolute before:content-[''] before:h-[16px] before:w-[16px] before:left-[4px] before:bottom-[4px] before:bg-white before:transition-[0.4s] before:rounded-full peer-checked:before:translate-x-[26px]`}>
+            </span>
+          </label>
+        </div>
+        {schedule && (
+          <div className="text-xs text-gray-500 font-medium text-right mt-1">
+            <div className="mb-0.5">Start Time: {schedule.start}</div>
+            <div>Stop Time: {schedule.stop}</div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -60,12 +76,12 @@ function MultiSelectDropdown({ options, selected, onChange }: {
   const [isOpen, setIsOpen] = useState(false);
 
   const toggleItem = (val: string) => {
-    if (val === 'custom') onChange(['custom']);
+    if (val === 'none') onChange(['none']);
     else {
       const newSelected = selected.includes(val) 
         ? selected.filter(v => v !== val) 
-        : [...selected.filter(v => v !== 'custom'), val];
-      onChange(newSelected.length ? newSelected : ['custom']);
+        : [...selected.filter(v => v !== 'none'), val];
+      onChange(newSelected.length ? newSelected : ['none']);
     }
   };
 
@@ -73,7 +89,7 @@ function MultiSelectDropdown({ options, selected, onChange }: {
     <div className="relative w-full text-sm" tabIndex={0} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setIsOpen(false); }}>
       <div className="w-full p-2 border border-gray-300 rounded-lg cursor-pointer bg-white flex justify-between items-center hover:border-secondary transition-colors" onClick={() => setIsOpen(!isOpen)}>
         <span className="truncate mr-2 text-gray-700 font-medium">
-          {selected.includes('custom') ? 'Custom / None' : selected.map(val => {
+          {selected.includes('none') ? 'None' : selected.map(val => {
             for (const group of options) {
               const found = group.items.find(i => i.value === val);
               if (found) return found.label;
@@ -86,7 +102,7 @@ function MultiSelectDropdown({ options, selected, onChange }: {
       {isOpen && (
         <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-[250px] overflow-y-auto top-full left-0">
           <label className="flex items-center px-3 py-2.5 hover:bg-gray-50 cursor-pointer text-gray-700 border-b border-gray-100 transition-colors">
-            <input type="checkbox" checked={selected.includes('custom')} onChange={() => toggleItem('custom')} className="mr-3 w-4 h-4 accent-secondary" /> Custom / None
+            <input type="checkbox" checked={selected.includes('none')} onChange={() => toggleItem('none')} className="mr-3 w-4 h-4 accent-secondary" /> None
           </label>
           {options.map((optGroup) => (
             <div key={optGroup.group}>
@@ -162,7 +178,7 @@ function useSystemSettings() {
   const [activeSensors, setActiveSensors] = useState({
     temperature: true, humidity: true, light: true, co2: true, ph: true, ec: true, do: true
   });
-  const [activeEquipment, setActiveEquipment] = useState({
+  const [activeEquipment, setActiveEquipment] = useState<Record<string, boolean>>({
     circulationFan: true, growLight: true, hvac: true, humidifier: true, co2Generator: true, waterPump: true, solenoidValve: true, dosingPump: true, airPump: true
   });
 
@@ -195,9 +211,10 @@ function useSystemSettings() {
     });
   };
 
-  const toggleEquipmentSetting = (key: keyof typeof activeEquipment) => {
+  const toggleEquipmentSetting = (key: string) => {
     setActiveEquipment(prev => {
-      const next = { ...prev, [key]: !prev[key] };
+      const currentVal = prev[key] !== false; // 값이 없으면(새 커스텀 기기) 기본 활성(true) 처리
+      const next = { ...prev, [key]: !currentVal };
       localStorage.setItem('sf_active_equipment', JSON.stringify(next));
       supabase.from('app_settings').upsert({ key: 'sf_active_equipment', value: next }).then();
       return next;
@@ -221,6 +238,8 @@ function useEquipmentControl(showNotification: (msg: string, type: NotificationT
     airPump: true
   });
 
+  const [customEquipmentStates, setCustomEquipmentStates] = useState<Record<string, boolean>>({});
+
   // 기기별 표시 이름 매핑 (대소문자 및 띄어쓰기 적용)
   const equipmentNames: Record<keyof typeof equipment, string> = {
     circulationFan: 'Circulation Fan',
@@ -234,24 +253,33 @@ function useEquipmentControl(showNotification: (msg: string, type: NotificationT
     airPump: 'Air Pump'
   };
 
-  const toggleEquipment = (key: keyof typeof equipment, state: boolean) => {
-    setEquipment(prev => ({ ...prev, [key]: state }));
-    showNotification(`${equipmentNames[key]} ${state ? 'activated' : 'deactivated'}`, 'success');
+  const toggleEquipment = (key: string, state: boolean, isCustom: boolean = false, customName: string = '') => {
+    if (isCustom) {
+      setCustomEquipmentStates(prev => ({ ...prev, [key]: state }));
+      showNotification(`${customName} ${state ? 'activated' : 'deactivated'}`, 'success');
+    } else {
+      setEquipment(prev => ({ ...prev, [key as keyof typeof equipment]: state }));
+      showNotification(`${equipmentNames[key as keyof typeof equipment]} ${state ? 'activated' : 'deactivated'}`, 'success');
+    }
   };
 
   const startAll = () => {
     const allOn = Object.keys(equipment).reduce((acc, key) => ({ ...acc, [key]: true }), {} as typeof equipment);
     setEquipment(allOn);
+    const allCustomOn = Object.keys(customEquipmentStates).reduce((acc, key) => ({ ...acc, [key]: true }), {});
+    setCustomEquipmentStates(allCustomOn);
     showNotification('Starting all equipment...', 'success');
   };
 
   const stopAll = () => {
     const allOff = Object.keys(equipment).reduce((acc, key) => ({ ...acc, [key]: false }), {} as typeof equipment);
     setEquipment(allOff);
+    const allCustomOff = Object.keys(customEquipmentStates).reduce((acc, key) => ({ ...acc, [key]: false }), {});
+    setCustomEquipmentStates(allCustomOff);
     showNotification('Stopping all equipment...', 'warning');
   };
 
-  return { equipment, toggleEquipment, startAll, stopAll };
+  return { equipment, customEquipmentStates, setCustomEquipmentStates, toggleEquipment, startAll, stopAll };
 }
 
 // 아두이노 핀 맵 데이터 정의 (UNO R3 vs UNO R4 WiFi)
@@ -276,11 +304,47 @@ const ARDUINO_PINS = [
   { id: 'UART', name: 'UART Bus (D1/D0)', r3: 'Hardware Serial (TX/RX)', r4: 'Hardware Serial1 (TX/RX)' },
 ];
 
+const SQL_SCHEMA_TEXT = `-- 1. 기기 및 구독(Subscribe) 설정 테이블 생성
+CREATE TABLE IF NOT EXISTS device_configs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    device_id TEXT UNIQUE NOT NULL,       -- 기기 식별자 (예: 'uno-r4-001')
+    mqtt_topic TEXT NOT NULL,             -- 구독할 토픽 (예: 'smartfarm/uno-r4-001/sensors')
+    is_active BOOLEAN DEFAULT true,       -- 데이터 수집 활성화 여부
+    description TEXT,                     -- 기기 설명
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2. 동적 센서 데이터(JSONB) 적재 테이블 생성
+CREATE TABLE IF NOT EXISTS dynamic_telemetry (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    device_id TEXT REFERENCES device_configs(device_id) ON DELETE CASCADE,
+    payload JSONB NOT NULL,               -- 센서 데이터를 통째로 저장하는 JSONB 컬럼
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- (선택) 보안을 위한 RLS(Row Level Security) 설정 및 조회 권한
+ALTER TABLE device_configs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dynamic_telemetry ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow public read for configs" ON device_configs FOR SELECT USING (true);
+CREATE POLICY "Allow public read for telemetry" ON dynamic_telemetry FOR SELECT USING (true);
+
+-- 설정 데이터를 저장할 테이블 생성
+CREATE TABLE app_settings (
+    key TEXT PRIMARY KEY,
+    value JSONB NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+-- 누구나 쉽게 읽고 쓸 수 있도록 RLS(Row Level Security) 권한 개방
+ALTER TABLE app_settings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public read and write" ON app_settings FOR ALL USING (true) WITH CHECK (true);`;
+
 export default function DashboardClient() {
   const searchParams = useSearchParams();
   const currentTab = searchParams.get('tab') || 'dashboard';
-  const { notifications, showNotification } = useNotification();
-  const { equipment, toggleEquipment, startAll, stopAll } = useEquipmentControl(showNotification);
+  const { notifications, showNotification, removeNotification } = useNotification();
+  const { equipment, customEquipmentStates, setCustomEquipmentStates, toggleEquipment, startAll, stopAll } = useEquipmentControl(showNotification);
 
   // 💡 여기서 설정한 값들을 꺼내옵니다. 이 코드가 누락되어서 에러가 발생했었습니다!
   const { activeSensors, activeEquipment, toggleSensor, toggleEquipmentSetting } = useSystemSettings();
@@ -297,6 +361,29 @@ export default function DashboardClient() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // System-level Global Settings (For New Deployments / Local Overrides)
+  const [sysSupabaseUrl, setSysSupabaseUrl] = useState('');
+  const [sysSupabaseAnonKey, setSysSupabaseAnonKey] = useState('');
+  const [sysSupabaseServiceKey, setSysSupabaseServiceKey] = useState('');
+  const [sysMqttUrl, setSysMqttUrl] = useState('');
+  const [sysMqttUser, setSysMqttUser] = useState('');
+  const [sysMqttPass, setSysMqttPass] = useState('');
+  const [sysGeminiKey, setSysGeminiKey] = useState('');
+  const [sysWifiSsid, setSysWifiSsid] = useState('');
+  const [sysWifiPass, setSysWifiPass] = useState('');
+
+  useEffect(() => {
+    setSysSupabaseUrl(localStorage.getItem('sf_sys_supabase_url') || '');
+    setSysSupabaseAnonKey(localStorage.getItem('sf_sys_supabase_anon_key') || '');
+    setSysSupabaseServiceKey(localStorage.getItem('sf_sys_supabase_service_key') || '');
+    setSysMqttUrl(localStorage.getItem('sf_sys_mqtt_url') || '');
+    setSysMqttUser(localStorage.getItem('sf_sys_mqtt_user') || '');
+    setSysMqttPass(localStorage.getItem('sf_sys_mqtt_pass') || '');
+    setSysGeminiKey(localStorage.getItem('sf_sys_gemini_key') || '');
+    setSysWifiSsid(localStorage.getItem('sf_sys_wifi_ssid') || '');
+    setSysWifiPass(localStorage.getItem('sf_sys_wifi_pass') || '');
+  }, []);
+
   // 모달 상태 관리
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false);
@@ -308,6 +395,144 @@ export default function DashboardClient() {
   const [isReviewing, setIsReviewing] = useState(false);
   const [loadedConfigs, setLoadedConfigs] = useState<any[]>([]);
   const [selectedArduinoBoard, setSelectedArduinoBoard] = useState<string>('Arduino UNO R4 WiFi');
+
+  // 커스텀 장비 추가 관련 상태
+  const [isAddEqModalOpen, setIsAddEqModalOpen] = useState(false);
+  const [newEqName, setNewEqName] = useState('');
+  const [newEqDesc, setNewEqDesc] = useState('');
+  const [customEquipments, setCustomEquipments] = useState<{id: string, name: string, description: string}[]>([]);
+
+  // 커스텀 장비 설정 로드
+  useEffect(() => {
+    const loadCustomEq = async () => {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', 'sf_custom_equipment').single();
+      let parsed = data?.value;
+      if (!parsed) {
+        const saved = localStorage.getItem('sf_custom_equipment');
+        if (saved) parsed = JSON.parse(saved);
+      }
+      if (parsed) {
+        setCustomEquipments(parsed);
+        const initialStates: Record<string, boolean> = {};
+        parsed.forEach((eq: any) => { initialStates[eq.id] = false; });
+        setCustomEquipmentStates(initialStates);
+      }
+    };
+    loadCustomEq();
+  }, []);
+
+  const handleSaveCustomEquipment = async () => {
+    if (!newEqName.trim()) return showNotification('Please enter the equipment name.', 'warning');
+    const newEq = { id: `custom_${Date.now()}`, name: newEqName, description: newEqDesc };
+    const updatedList = [...customEquipments, newEq];
+    setCustomEquipments(updatedList);
+    setCustomEquipmentStates(prev => ({ ...prev, [newEq.id]: false }));
+    await supabase.from('app_settings').upsert({ key: 'sf_custom_equipment', value: updatedList });
+    localStorage.setItem('sf_custom_equipment', JSON.stringify(updatedList));
+    showNotification(`${newEqName} added successfully!`, 'success');
+    setIsAddEqModalOpen(false);
+    setNewEqName('');
+    setNewEqDesc('');
+  };
+
+  // 장비 스케줄 설정 관련 상태
+  const [isEquipConfigModalOpen, setIsEquipConfigModalOpen] = useState(false);
+  const [configEquip, setConfigEquip] = useState('circulationFan');
+  const [equipStartAmPm, setEquipStartAmPm] = useState('AM');
+  const [equipStartHour, setEquipStartHour] = useState('08');
+  const [equipStartMinute, setEquipStartMinute] = useState('00');
+  const [equipStopAmPm, setEquipStopAmPm] = useState('PM');
+  const [equipStopHour, setEquipStopHour] = useState('06');
+  const [equipStopMinute, setEquipStopMinute] = useState('00');
+  const [equipSchedules, setEquipSchedules] = useState<Record<string, { start: string, stop: string }>>({});
+
+  const loadAllEquipSchedules = async () => {
+    const equipList = [...Object.keys(equipmentNamesList), ...customEquipments.map(eq => eq.id)];
+    const newSchedules: Record<string, any> = {};
+    
+    const keys = equipList.map(e => `sf_equip_schedule_${e}`);
+    const { data } = await supabase.from('app_settings').select('key, value').in('key', keys);
+    
+    equipList.forEach(e => {
+      const key = `sf_equip_schedule_${e}`;
+      const dbItem = data?.find(d => d.key === key);
+      if (dbItem?.value) {
+        newSchedules[e] = dbItem.value;
+      } else {
+        const saved = localStorage.getItem(key);
+        if (saved) newSchedules[e] = JSON.parse(saved);
+      }
+    });
+    setEquipSchedules(newSchedules);
+  };
+
+  useEffect(() => {
+    loadAllEquipSchedules();
+  }, [customEquipments]);
+
+  useEffect(() => {
+    if (isEquipConfigModalOpen) {
+      const schedule = equipSchedules[configEquip];
+      if (schedule) {
+        const [sAmPm, sTime] = schedule.start.split(' ');
+        const [sHr, sMin] = sTime.split(':');
+        setEquipStartAmPm(sAmPm);
+        setEquipStartHour(sHr);
+        setEquipStartMinute(sMin);
+
+        const [stAmPm, stTime] = schedule.stop.split(' ');
+        const [stHr, stMin] = stTime.split(':');
+        setEquipStopAmPm(stAmPm);
+        setEquipStopHour(stHr);
+        setEquipStopMinute(stMin);
+      } else {
+        setEquipStartAmPm('AM');
+        setEquipStartHour('08');
+        setEquipStartMinute('00');
+        setEquipStopAmPm('PM');
+        setEquipStopHour('06');
+        setEquipStopMinute('00');
+      }
+    }
+  }, [isEquipConfigModalOpen, configEquip, equipSchedules]);
+
+  const handleSaveEquipSchedule = async () => {
+    const startStr = `${equipStartAmPm} ${equipStartHour.padStart(2, '0')}:${equipStartMinute.padStart(2, '0')}`;
+    const stopStr = `${equipStopAmPm} ${equipStopHour.padStart(2, '0')}:${equipStopMinute.padStart(2, '0')}`;
+    const scheduleData = { start: startStr, stop: stopStr };
+
+    const key = `sf_equip_schedule_${configEquip}`;
+    await supabase.from('app_settings').upsert({ key, value: scheduleData });
+    localStorage.setItem(key, JSON.stringify(scheduleData));
+    
+    const equipName = equipmentNamesList[configEquip as keyof typeof equipmentNamesList] || customEquipments.find(e => e.id === configEquip)?.name || 'Equipment';
+    showNotification(`${equipName} schedule saved successfully!`, 'success');
+    
+    loadAllEquipSchedules();
+    setIsEquipConfigModalOpen(false);
+  };
+
+  const handleSaveSysSupabase = () => {
+    localStorage.setItem('sf_sys_supabase_url', sysSupabaseUrl);
+    localStorage.setItem('sf_sys_supabase_anon_key', sysSupabaseAnonKey);
+    localStorage.setItem('sf_sys_supabase_service_key', sysSupabaseServiceKey);
+    showNotification('Supabase settings saved. (Requires client restart to apply)', 'success');
+  };
+  const handleSaveSysMqtt = () => {
+    localStorage.setItem('sf_sys_mqtt_url', sysMqttUrl);
+    localStorage.setItem('sf_sys_mqtt_user', sysMqttUser);
+    localStorage.setItem('sf_sys_mqtt_pass', sysMqttPass);
+    showNotification('MQTT configuration saved.', 'success');
+  };
+  const handleSaveSysGemini = () => {
+    localStorage.setItem('sf_sys_gemini_key', sysGeminiKey);
+    showNotification('Gemini API Key saved locally.', 'success');
+  };
+  const handleSaveSysWifi = () => {
+    localStorage.setItem('sf_sys_wifi_ssid', sysWifiSsid);
+    localStorage.setItem('sf_sys_wifi_pass', sysWifiPass);
+    showNotification('WiFi Network settings saved.', 'success');
+  };
 
   // 센서 설정 모달이 열리거나 센서 종류(configSensor)를 변경할 때, 기존에 저장된 값을 폼에 불러오기
   useEffect(() => {
@@ -383,12 +608,12 @@ export default function DashboardClient() {
   });
   const [pinMappings, setPinMappings] = useState<Record<string, string[][]>>({
     D2: [['Temperature', 'Humidity']],
-    A0: [['custom']],
+    A0: [['none']],
     A1: [['Light Intensity']],
     D3: [['growLight']],
     D4: [['circulationFan']],
     D5: [['waterPump']],
-    I2C: [['custom'], ['Temperature', 'Humidity']]
+    I2C: [['none'], ['Temperature', 'Humidity']]
   });
   const [pinMqttTopics, setPinMqttTopics] = useState<Record<string, string[][]>>({
     D2: [['smartfarm/uno-r4/sensors']],
@@ -493,7 +718,14 @@ export default function DashboardClient() {
         const migratedMappings: Record<string, string[][]> = {};
         const oldMappings = migrateI2C(parsed.pinMappings);
         if (oldMappings) {
-          Object.entries(oldMappings).forEach(([k, v]) => { migratedMappings[k] = Array.isArray(v) ? v.map((item: any) => Array.isArray(item) ? item : [item]) : [['custom']]; });
+          Object.entries(oldMappings).forEach(([k, v]) => { 
+            migratedMappings[k] = Array.isArray(v) 
+              ? v.map((item: any) => {
+                  const arr = Array.isArray(item) ? item : [item];
+                  return arr.map(i => i === 'custom' ? 'none' : i);
+                }) 
+              : [['none']]; 
+          });
         }
 
         // 동일하게 topics도 다중 배열 구조로 마이그레이션
@@ -536,6 +768,13 @@ export default function DashboardClient() {
     });
   };
 
+  const handleRemoveBusDevice = (pinId: string, index: number) => {
+    setPinCounts(prev => ({ ...prev, [pinId]: Math.max(1, (prev[pinId] || 1) - 1) }));
+    setPinConfigs(prev => { const next = [...(prev[pinId] || [])]; next.splice(index, 1); return { ...prev, [pinId]: next }; });
+    setPinMappings(prev => { const next = [...(prev[pinId] || [])]; next.splice(index, 1); return { ...prev, [pinId]: next }; });
+    setPinMqttTopics(prev => { const next = [...(prev[pinId] || [])]; next.splice(index, 1); return { ...prev, [pinId]: next }; });
+  };
+
   const handlePinMappingChange = (pinId: string, index: number, value: string[]) => {
     setPinMappings(prev => {
       const current = prev[pinId] || [];
@@ -544,16 +783,31 @@ export default function DashboardClient() {
       return { ...prev, [pinId]: next };
     });
     
-    // 매핑 항목 수에 맞게 MQTT Topic 배열 개수도 동기화
-    setPinMqttTopics(prev => {
-      const current = prev[pinId] || [];
-      const next = [...current];
-      const currentTopics = next[index] || [];
-      
-      const newTopics = value.map((_, i) => currentTopics[i] !== undefined ? currentTopics[i] : (currentTopics[currentTopics.length - 1] || 'smartfarm/uno-r4/topic'));
-      next[index] = newTopics;
-      return { ...prev, [pinId]: next };
-    });
+    if (value.includes('none')) {
+      // None 선택 시 기기 이름과 토픽을 비움(Clear)
+      setPinConfigs(prev => {
+        const current = prev[pinId] || [];
+        const next = [...current];
+        next[index] = '';
+        return { ...prev, [pinId]: next };
+      });
+      setPinMqttTopics(prev => {
+        const current = prev[pinId] || [];
+        const next = [...current];
+        next[index] = [];
+        return { ...prev, [pinId]: next };
+      });
+    } else {
+      // 매핑 항목 수에 맞게 MQTT Topic 배열 개수도 동기화
+      setPinMqttTopics(prev => {
+        const current = prev[pinId] || [];
+        const next = [...current];
+        const currentTopics = next[index] || [];
+        const newTopics = value.map((_, i) => currentTopics[i] !== undefined ? currentTopics[i] : '');
+        next[index] = newTopics;
+        return { ...prev, [pinId]: next };
+      });
+    }
   };
 
   const handlePinMqttTopicChange = (pinId: string, index: number, topicIndex: number, value: string) => {
@@ -604,7 +858,8 @@ export default function DashboardClient() {
           mappings: pinMappings,
           topics: pinMqttTopics
         },
-        sensorSettings: sensorConfigs
+      sensorSettings: sensorConfigs,
+      geminiApiKey: sysGeminiKey
       };
 
       const response = await fetch('/api/generate-sketch', {
@@ -798,8 +1053,24 @@ while True:
       { label: 'Temperature', value: 'Temperature' }, { label: 'Humidity', value: 'Humidity' }, { label: 'Light Intensity', value: 'Light Intensity' },
       { label: 'pH', value: 'Hydrogen Ion Concentration' }, { label: 'EC', value: 'Electrical Conductivity' }, { label: 'DO', value: 'Dissolved Oxygen' }, { label: 'Carbon Dioxide', value: 'Carbon Dioxide' }
     ]},
-    { group: 'Equipment', items: Object.entries(equipmentNamesList).map(([k, v]) => ({ label: v, value: k })) }
+    { group: 'Equipment', items: [
+      ...Object.entries(equipmentNamesList).map(([k, v]) => ({ label: v, value: k })),
+      ...customEquipments.map(eq => ({ label: eq.name, value: eq.id }))
+    ]}
   ];
+
+  // MQTT Topic Placeholder 동적 생성 (이전 입력값 기반)
+  let commonTopicPrefix = 'smartfarm/uno-r4';
+  for (const pinId in pinMqttTopics) {
+    const found = pinMqttTopics[pinId]?.flat().find(t => t && t.includes('/'));
+    if (found) {
+      const parts = found.split('/');
+      parts.pop(); // 마지막 depth 제거 (예: temp, ppfd 등)
+      commonTopicPrefix = parts.join('/');
+      break;
+    }
+  }
+  const topicPlaceholder = `e.g. ${commonTopicPrefix}/**`;
 
   return (
     <div className="animate-[fadeIn_0.5s_ease-in-out] w-full">
@@ -967,10 +1238,13 @@ while True:
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-semibold text-primary">Equipment Control</h2>
             <div className="flex gap-4">
-              <button onClick={startAll} className="flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg transition-all">
+              <button onClick={() => setIsEquipConfigModalOpen(true)} className="flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-full transition-all">
+                <SlidersHorizontal size={18} /> Configure
+              </button>
+              <button onClick={startAll} className="flex items-center gap-2 bg-state-on hover:bg-state-on/90 text-white px-4 py-2 rounded-full transition-all">
                 <Play size={18} /> Start All
               </button>
-              <button onClick={stopAll} className="flex items-center gap-2 bg-danger hover:bg-danger/90 text-white px-4 py-2 rounded-lg transition-all">
+              <button onClick={stopAll} className="flex items-center gap-2 bg-state-off hover:bg-state-off/90 text-white px-4 py-2 rounded-full transition-all">
                 <Square size={18} /> Stop All
               </button>
             </div>
@@ -984,26 +1258,31 @@ while True:
                 name="Circulation Fan" icon="mdi-fan" 
                 details="Power: ON / OFF | Speed (RPM): 0~100%" description="내부 공기 순환, 온도 하강 및 수분 부족분(VPD) 조절"
                 isOn={equipment.circulationFan} onToggle={(state) => toggleEquipment('circulationFan', state)} isActive={activeEquipment.circulationFan}
+                schedule={equipSchedules['circulationFan']}
               />
               <EquipmentItem 
                 name="Grow Light" icon="mdi-lightbulb-on" 
                 details="Power: ON / OFF | Dimming: 0 ~ 100%" description="광합성에 필요한 유효 광량(PPFD) 공급"
                 isOn={equipment.growLight} onToggle={(state) => toggleEquipment('growLight', state)} isActive={activeEquipment.growLight}
+                schedule={equipSchedules['growLight']}
               />
               <EquipmentItem 
                 name="HVAC" icon="mdi-air-conditioner" 
                 details="Power: ON / OFF | Target Temp(°C)" description="목표 온도(DIF) 유지를 위한 강력한 온도 제어"
                 isOn={equipment.hvac} onToggle={(state) => toggleEquipment('hvac', state)} isActive={activeEquipment.hvac}
+                schedule={equipSchedules['hvac']}
               />
               <EquipmentItem 
                 name="Humidifier" icon="mdi-air-humidifier" 
                 details="Power: ON / OFF | Target Hum(%)" description="적정 상대습도(RH) 유지 및 곰팡이병 방지"
                 isOn={equipment.humidifier} onToggle={(state) => toggleEquipment('humidifier', state)} isActive={activeEquipment.humidifier}
+                schedule={equipSchedules['humidifier']}
               />
               <EquipmentItem 
                 name="CO2 Generator" icon="mdi-gas-cylinder" 
                 details="Valve State: Open / Close | Target CO2(ppm)" description="광합성 촉진을 위한 탄산가스 시비"
                 isOn={equipment.co2Generator} onToggle={(state) => toggleEquipment('co2Generator', state)} isActive={activeEquipment.co2Generator}
+                schedule={equipSchedules['co2Generator']}
               />
             </div>
           </div>
@@ -1016,23 +1295,52 @@ while True:
                 name="Water Pump" icon="mdi-water-pump" 
                 details="Power: ON / OFF | Duty Cycle: Running(Sec) / Stopped(Sec)" description="NFT/DFT 배드로 양액을 순환시켜 뿌리에 수분/양분 공급"
                 isOn={equipment.waterPump} onToggle={(state) => toggleEquipment('waterPump', state)} isActive={activeEquipment.waterPump}
+                schedule={equipSchedules['waterPump']}
               />
               <EquipmentItem 
                 name="Solenoid Valve" icon="mdi-pipe-valve" 
                 details="Valve State: Open / Close" description="특정 구역(Zone)으로 가는 관수 라인 개폐"
                 isOn={equipment.solenoidValve} onToggle={(state) => toggleEquipment('solenoidValve', state)} isActive={activeEquipment.solenoidValve}
+                schedule={equipSchedules['solenoidValve']}
               />
               <EquipmentItem 
                 name="Dosing Pump" icon="mdi-eyedropper" 
                 details="Injection(mL) | Pulse" description="A액, B액, 산, 알칼리를 튜브로 미세 주입하여 EC/pH 맞춤"
                 isOn={equipment.dosingPump} onToggle={(state) => toggleEquipment('dosingPump', state)} isActive={activeEquipment.dosingPump}
+                schedule={equipSchedules['dosingPump']}
               />
               <EquipmentItem 
                 name="Air Pump" icon="mdi-weather-windy" 
                 details="Power: ON / OFF" description="양액 탱크 내 용존 산소(DO) 농도 증가"
                 isOn={equipment.airPump} onToggle={(state) => toggleEquipment('airPump', state)} isActive={activeEquipment.airPump}
+                schedule={equipSchedules['airPump']}
               />
             </div>
+          </div>
+
+          {/* Custom Equipment Section */}
+          {customEquipments.length > 0 && (
+            <div className="bg-white rounded-xl p-6 shadow-[0_4px_12px_rgba(0,0,0,0.05)] border-l-4 border-info mb-6 transition-all hover:shadow-md">
+              <h3 className="text-lg font-semibold text-primary mb-4">Custom Equipments</h3>
+              <div className="flex flex-col gap-4">
+                {customEquipments.map((eq) => (
+                  <EquipmentItem 
+                    key={eq.id}
+                    name={eq.name} icon="mdi-expansion-port" 
+                    details="Power: ON / OFF" description={eq.description || 'Custom added equipment'}
+                    isOn={customEquipmentStates[eq.id] || false} onToggle={(state) => toggleEquipment(eq.id, state, true, eq.name)} isActive={activeEquipment[eq.id] !== false}
+                    schedule={equipSchedules[eq.id]}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Add Equipment Button */}
+          <div className="flex justify-end mt-4 mb-8">
+            <button onClick={() => setIsAddEqModalOpen(true)} className="flex items-center gap-2 bg-light hover:bg-gray-200 text-gray-800 px-6 py-3 rounded-full font-medium transition-all shadow-sm border border-gray-300">
+              <span className="text-xl">+</span> Add Equipment
+            </button>
           </div>
         </div>
       )}
@@ -1045,7 +1353,7 @@ while True:
           </div>
           <div className="grid md:grid-cols-2 gap-8">
             <div className="bg-white rounded-xl p-6 shadow-sm border-t-4 border-primary">
-              <h3 className="text-lg font-semibold text-primary mb-4 flex items-center gap-2"><Cpu size={20}/> Sensor Visibility</h3>
+              <h3 className="text-lg font-semibold text-primary mb-4 flex items-center gap-2"><Cpu size={20}/> Sensor Availability</h3>
               <div className="flex flex-col gap-3">
                 {Object.entries({ temperature: 'Temperature', humidity: 'Humidity', light: 'Light Intensity', co2: 'Carbon Dioxide', ph: 'Hydrogen Ion Concentration', ec: 'Electrical Conductivity', do: 'Dissolved Oxygen' }).map(([key, label]) => (
                   <label key={key} className="flex items-center gap-3 cursor-pointer p-2 hover:bg-light rounded-lg transition-colors">
@@ -1061,10 +1369,114 @@ while True:
               <div className="flex flex-col gap-3">
                 {Object.entries(equipmentNamesList).map(([key, label]) => (
                   <label key={key} className="flex items-center gap-3 cursor-pointer p-2 hover:bg-light rounded-lg transition-colors">
-                    <input type="checkbox" checked={activeEquipment[key as keyof typeof activeEquipment]} onChange={() => toggleEquipmentSetting(key as keyof typeof activeEquipment)} className="w-5 h-5 accent-secondary cursor-pointer" />
+                    <input type="checkbox" checked={activeEquipment[key] !== false} onChange={() => toggleEquipmentSetting(key)} className="w-5 h-5 accent-secondary cursor-pointer" />
                     <span className="text-gray-700 font-medium">{label}</span>
                   </label>
                 ))}
+                {customEquipments.map((eq) => (
+                  <label key={eq.id} className="flex items-center gap-3 cursor-pointer p-2 hover:bg-light rounded-lg transition-colors">
+                    <input type="checkbox" checked={activeEquipment[eq.id] !== false} onChange={() => toggleEquipmentSetting(eq.id)} className="w-5 h-5 accent-secondary cursor-pointer" />
+                    <span className="text-gray-700 font-medium">{eq.name} <span className="text-[10px] text-info border border-info px-1.5 py-0.5 rounded-full ml-1 font-bold">Custom</span></span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <hr className="border-0 border-t border-gray-200 my-10" />
+
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-semibold text-primary">Global Environment Configurations</h2>
+            <span className="text-sm text-gray-500">For new deployments and system overrides</span>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-8 mb-10">
+            {/* Supabase Config */}
+            <div className="bg-white rounded-xl p-6 shadow-sm border-t-4 border-info">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold text-primary flex items-center gap-2"><Database size={20}/> Supabase Configuration</h3>
+                <button onClick={handleSaveSysSupabase} className="bg-primary hover:bg-primary/90 text-white px-3 py-1.5 rounded text-sm font-medium transition-colors">Save</button>
+              </div>
+              <div className="flex flex-col gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Project URL</label>
+                  <input type="text" placeholder="https://[your-project].supabase.co" value={sysSupabaseUrl} onChange={e => setSysSupabaseUrl(e.target.value)} className="w-full p-2 border border-gray-300 rounded focus:border-secondary outline-none text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Anon Key (Public)</label>
+                  <input type="password" placeholder="eyJh..." value={sysSupabaseAnonKey} onChange={e => setSysSupabaseAnonKey(e.target.value)} className="w-full p-2 border border-gray-300 rounded focus:border-secondary outline-none text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Service Role Key (Secret, for Data Logger)</label>
+                  <input type="password" placeholder="eyJh..." value={sysSupabaseServiceKey} onChange={e => setSysSupabaseServiceKey(e.target.value)} className="w-full p-2 border border-gray-300 rounded focus:border-secondary outline-none text-sm" />
+                </div>
+                <div className="mt-2">
+                  <label className="flex items-center justify-between text-xs font-medium text-gray-700 mb-1">
+                    <span>Initial SQL Schema (SQL Editor)</span>
+                    <button onClick={() => { navigator.clipboard.writeText(SQL_SCHEMA_TEXT); showNotification('SQL copied!', 'success'); }} className="text-secondary hover:underline flex items-center gap-1"><Copy size={12}/> Copy SQL</button>
+                  </label>
+                  <textarea readOnly value={SQL_SCHEMA_TEXT} className="w-full p-2 border border-gray-300 rounded bg-gray-50 text-gray-600 outline-none text-xs resize-y overflow-y-auto font-mono" rows={12} />
+                </div>
+              </div>
+            </div>
+
+            {/* MQTT Config */}
+            <div className="bg-white rounded-xl p-6 shadow-sm border-t-4 border-warning">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold text-primary flex items-center gap-2"><Cloud size={20}/> MQTT Configuration</h3>
+                <button onClick={handleSaveSysMqtt} className="bg-primary hover:bg-primary/90 text-white px-3 py-1.5 rounded text-sm font-medium transition-colors">Save</button>
+              </div>
+              <div className="flex flex-col gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Broker URL</label>
+                  <input type="text" placeholder="mqtts://[cluster].hivemq.cloud:8883" value={sysMqttUrl} onChange={e => setSysMqttUrl(e.target.value)} className="w-full p-2 border border-gray-300 rounded focus:border-secondary outline-none text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Username</label>
+                  <input type="text" placeholder="Username" value={sysMqttUser} onChange={e => setSysMqttUser(e.target.value)} className="w-full p-2 border border-gray-300 rounded focus:border-secondary outline-none text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Password</label>
+                  <input type="password" placeholder="Password" value={sysMqttPass} onChange={e => setSysMqttPass(e.target.value)} className="w-full p-2 border border-gray-300 rounded focus:border-secondary outline-none text-sm" />
+                </div>
+              </div>
+            </div>
+
+            {/* Gemini API Config */}
+            <div className="bg-white rounded-xl p-6 shadow-sm border-t-4 border-purple-500">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold text-primary flex items-center gap-2"><FileCode2 size={20}/> Gemini API Configuration</h3>
+                <button onClick={handleSaveSysGemini} className="bg-primary hover:bg-primary/90 text-white px-3 py-1.5 rounded text-sm font-medium transition-colors">Save</button>
+              </div>
+              <div className="flex flex-col gap-3">
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  Overrides the server's default GEMINI_API_KEY environment variable. Used for generating Arduino & Python code.
+                </p>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">API Key</label>
+                  <input type="password" placeholder="AIza..." value={sysGeminiKey} onChange={e => setSysGeminiKey(e.target.value)} className="w-full p-2 border border-gray-300 rounded focus:border-secondary outline-none text-sm" />
+                </div>
+              </div>
+            </div>
+
+            {/* WiFi Config */}
+            <div className="bg-white rounded-xl p-6 shadow-sm border-t-4 border-success">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold text-primary flex items-center gap-2"><Wifi size={20}/> WiFi Setup (For Devices)</h3>
+                <button onClick={handleSaveSysWifi} className="bg-primary hover:bg-primary/90 text-white px-3 py-1.5 rounded text-sm font-medium transition-colors">Save</button>
+              </div>
+              <div className="flex flex-col gap-3">
+                <div className="bg-yellow-50 text-yellow-700 p-2 rounded text-[11px] border border-yellow-200">
+                  <strong>Note:</strong> Web browsers cannot directly scan local WiFi networks due to security constraints. Please enter your network credentials manually below.
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Network Name (SSID)</label>
+                  <input type="text" placeholder="Enter WiFi SSID" value={sysWifiSsid} onChange={e => setSysWifiSsid(e.target.value)} className="w-full p-2 border border-gray-300 rounded focus:border-secondary outline-none text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Password</label>
+                  <input type="password" placeholder="Enter WiFi Password" value={sysWifiPass} onChange={e => setSysWifiPass(e.target.value)} className="w-full p-2 border border-gray-300 rounded focus:border-secondary outline-none text-sm" />
+                </div>
               </div>
             </div>
           </div>
@@ -1196,17 +1608,24 @@ while True:
                                 </td>
                               )}
                               <td className="p-4 align-top">
-                                <MultiSelectDropdown options={mappingOptions} selected={pinMappings[pin.id]?.[i] || ['custom']} onChange={(vals) => handlePinMappingChange(pin.id, i, vals)} />
+                                <MultiSelectDropdown options={mappingOptions} selected={pinMappings[pin.id]?.[i] || ['none']} onChange={(vals) => handlePinMappingChange(pin.id, i, vals)} />
                               </td>
                               <td className="p-4 align-top">
                                 <div className="flex flex-col gap-1 w-full bg-gray-50/50 p-1.5 rounded-lg border border-gray-100">
-                                  {(pinMappings[pin.id]?.[i] || ['custom']).map((mapping, tIdx) => (
-                                    <input key={tIdx} type="text" placeholder={`Topic for ${mapping}`} value={pinMqttTopics[pin.id]?.[i]?.[tIdx] || ''} onChange={(e) => handlePinMqttTopicChange(pin.id, i, tIdx, e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-1 focus:ring-secondary outline-none text-xs transition-all bg-white" />
+                                  {(pinMappings[pin.id]?.[i] || ['none']).map((mapping, tIdx) => (
+                                    <input key={tIdx} type="text" placeholder={topicPlaceholder} value={pinMqttTopics[pin.id]?.[i]?.[tIdx] || ''} onChange={(e) => handlePinMqttTopicChange(pin.id, i, tIdx, e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-1 focus:ring-secondary outline-none text-xs transition-all bg-white" />
                                   ))}
                                 </div>
                               </td>
                               <td className="p-4 align-top">
-                                <input type="text" placeholder={pin.isBus ? `Bus Device ${i + 1} (e.g. Module)` : pin.id === 'UART' ? 'e.g. RS485, MH-Z19' : `e.g. DHT22 Sensor`} value={pinConfigs[pin.id]?.[i] || ''} onChange={(e) => handlePinDeviceChange(pin.id, i, e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-1 focus:ring-secondary outline-none text-sm transition-all" />
+                                <div className="flex items-center gap-2">
+                                  <input type="text" placeholder={pin.isBus ? `Bus Device ${i + 1} (e.g. Module)` : pin.id === 'UART' ? 'e.g. RS485, MH-Z19' : `e.g. DHT22 Sensor`} value={pinConfigs[pin.id]?.[i] || ''} onChange={(e) => handlePinDeviceChange(pin.id, i, e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-1 focus:ring-secondary outline-none text-sm transition-all" />
+                                  {pin.isBus && count > 1 && (
+                                    <button onClick={() => handleRemoveBusDevice(pin.id, i)} title="Remove Device" className="text-gray-400 hover:text-danger transition-colors p-1">
+                                      <X size={20} />
+                                    </button>
+                                  )}
+                                </div>
                               </td>
                             </tr>
                           ))}
@@ -1324,15 +1743,20 @@ while True:
       {/* 4단계: 알림(Toast Notification) UI */}
       <div className="fixed top-5 right-5 z-[1001] flex flex-col gap-3 w-full max-w-[400px]">
         {notifications.map(n => (
-          <div key={n.id} className={`flex items-center gap-3 p-4 bg-white rounded-lg shadow-lg border-l-4 animate-in slide-in-from-right-8 fade-in duration-300
+          <div key={n.id} className={`flex items-start gap-3 p-4 bg-white rounded-lg shadow-lg border-l-4 animate-in slide-in-from-right-8 fade-in duration-300
             ${n.type === 'success' ? 'border-success' : n.type === 'warning' ? 'border-warning' : n.type === 'error' ? 'border-danger' : 'border-info'}`}>
-            <div className="flex-shrink-0">
+            <div className="flex-shrink-0 mt-0.5">
               {n.type === 'success' && <CheckCircle className="text-success" size={24} />}
               {n.type === 'warning' && <AlertTriangle className="text-warning" size={24} />}
               {n.type === 'error' && <XCircle className="text-danger" size={24} />}
               {n.type === 'info' && <Info className="text-info" size={24} />}
             </div>
-            <div className="text-gray-800 font-medium">{n.message}</div>
+            <div className="flex-1 text-gray-800 font-medium text-sm max-h-[150px] overflow-y-auto whitespace-pre-wrap break-words pr-1">
+              {n.message}
+            </div>
+            <button onClick={() => removeNotification(n.id)} className="flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors mt-0.5">
+              <X size={20} />
+            </button>
           </div>
         ))}
       </div>
@@ -1551,6 +1975,97 @@ while True:
                 <Download size={20} /> Download .py File
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Equipment Modal */}
+      {isAddEqModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex justify-center items-center z-[1000] animate-in fade-in duration-200">
+          <div className="bg-white p-8 rounded-xl w-[90%] max-w-[600px] shadow-2xl">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-2xl font-semibold text-primary">Add Custom Equipment</h3>
+              <button onClick={() => setIsAddEqModalOpen(false)} className="text-gray-400 hover:text-gray-600 transition-colors"><X size={24} /></button>
+            </div>
+            <div className="mb-4">
+              <label className="block mb-2 font-medium text-primary">Equipment Name (기기 명칭)</label>
+              <input type="text" className="w-full p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" placeholder="Enter equipment name" value={newEqName} onChange={e => setNewEqName(e.target.value)} />
+            </div>
+            <div className="mb-6">
+              <label className="block mb-2 font-medium text-primary">Equipment Description (기기 설명)</label>
+              <textarea className="w-full p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors resize-none" rows={3} placeholder="Enter equipment description" value={newEqDesc} onChange={e => setNewEqDesc(e.target.value)} />
+            </div>
+            <button onClick={handleSaveCustomEquipment} className="w-full bg-primary text-white p-3 rounded-lg flex justify-center items-center gap-2 hover:bg-primary/90 transition-colors font-medium">
+              <CheckCircle size={20} /> Save Equipment
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Equipment Configuration Modal */}
+      {isEquipConfigModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex justify-center items-center z-[1000] animate-in fade-in duration-200">
+          <div className="bg-white p-8 rounded-xl w-[90%] max-w-[500px] shadow-2xl">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-2xl font-semibold text-primary">Configure Schedule</h3>
+              <button onClick={() => setIsEquipConfigModalOpen(false)} className="text-gray-400 hover:text-gray-600 transition-colors"><X size={24} /></button>
+            </div>
+            
+            <div className="mb-6">
+              <label className="block mb-2 font-medium text-primary">Select Equipment</label>
+              <select className="w-full p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" value={configEquip} onChange={e => setConfigEquip(e.target.value)}>
+                <optgroup label="Default Equipment">
+                  {Object.entries(equipmentNamesList).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
+                </optgroup>
+                {customEquipments.length > 0 && (
+                  <optgroup label="Custom Equipment">
+                    {customEquipments.map(eq => (
+                      <option key={eq.id} value={eq.id}>{eq.name}</option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </div>
+            
+            <div className="mb-6">
+              <label className="block mb-2 font-medium text-primary">Start Time (운전 시작)</label>
+              <div className="flex gap-2 items-center">
+                <select className="p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" value={equipStartAmPm} onChange={e => setEquipStartAmPm(e.target.value)}>
+                  <option value="AM">AM (오전)</option>
+                  <option value="PM">PM (오후)</option>
+                </select>
+                <select className="p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors flex-1" value={equipStartHour} onChange={e => setEquipStartHour(e.target.value)}>
+                  {Array.from({length: 12}, (_, i) => String(i + 1).padStart(2, '0')).map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+                <span className="font-bold">:</span>
+                <select className="p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors flex-1" value={equipStartMinute} onChange={e => setEquipStartMinute(e.target.value)}>
+                  {Array.from({length: 60}, (_, i) => String(i).padStart(2, '0')).map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="mb-8">
+              <label className="block mb-2 font-medium text-primary">Stop Time (운전 정지)</label>
+              <div className="flex gap-2 items-center">
+                <select className="p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" value={equipStopAmPm} onChange={e => setEquipStopAmPm(e.target.value)}>
+                  <option value="AM">AM (오전)</option>
+                  <option value="PM">PM (오후)</option>
+                </select>
+                <select className="p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors flex-1" value={equipStopHour} onChange={e => setEquipStopHour(e.target.value)}>
+                  {Array.from({length: 12}, (_, i) => String(i + 1).padStart(2, '0')).map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+                <span className="font-bold">:</span>
+                <select className="p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors flex-1" value={equipStopMinute} onChange={e => setEquipStopMinute(e.target.value)}>
+                  {Array.from({length: 60}, (_, i) => String(i).padStart(2, '0')).map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <button onClick={handleSaveEquipSchedule} className="w-full bg-primary text-white p-3 rounded-lg flex justify-center items-center gap-2 hover:bg-primary/90 transition-colors font-medium">
+              <CheckCircle size={20} /> Save Schedule
+            </button>
           </div>
         </div>
       )}
