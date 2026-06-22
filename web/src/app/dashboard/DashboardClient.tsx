@@ -372,6 +372,14 @@ export default function DashboardClient() {
   const [sysWifiSsid, setSysWifiSsid] = useState('');
   const [sysWifiPass, setSysWifiPass] = useState('');
 
+  // WiFi Scan & Setup 관련 상태 변수
+  const [scannedWifiList, setScannedWifiList] = useState<Array<{ ssid: string; signal: string; security: string }>>([]);
+  const [isWifiScanning, setIsWifiScanning] = useState(false);
+  const [isWifiConnecting, setIsWifiConnecting] = useState(false);
+  const [selectedWifiSsid, setSelectedWifiSsid] = useState('');
+  const [wifiScanPassword, setWifiScanPassword] = useState('');
+  const [scanWarningMessage, setScanWarningMessage] = useState('');
+
   useEffect(() => {
     setSysSupabaseUrl(localStorage.getItem('sf_sys_supabase_url') || '');
     setSysSupabaseAnonKey(localStorage.getItem('sf_sys_supabase_anon_key') || '');
@@ -532,6 +540,69 @@ export default function DashboardClient() {
     localStorage.setItem('sf_sys_wifi_ssid', sysWifiSsid);
     localStorage.setItem('sf_sys_wifi_pass', sysWifiPass);
     showNotification('WiFi Network settings saved.', 'success');
+  };
+
+  // Wi-Fi 스캔 핸들러
+  const handleScanWifi = async () => {
+    setIsWifiScanning(true);
+    setScanWarningMessage('');
+    showNotification('Scanning surrounding Wi-Fi networks...', 'info');
+    try {
+      const response = await fetch('/api/wifi/scan');
+      const data = await response.json();
+      if (data.success) {
+        setScannedWifiList(data.networks || []);
+        if (data.isMock) {
+          setScanWarningMessage(data.warning);
+          showNotification('Scanned networks loaded (Using simulated data).', 'info');
+        } else {
+          showNotification(`Scan complete. Found ${data.networks.length} networks.`, 'success');
+        }
+      } else {
+        showNotification(data.error || 'Failed to scan Wi-Fi networks.', 'error');
+      }
+    } catch (error: any) {
+      console.error(error);
+      showNotification('Error contacting Wi-Fi scan service.', 'error');
+    } finally {
+      setIsWifiScanning(false);
+    }
+  };
+
+  // Wi-Fi 연결 핸들러
+  const handleConnectWifi = async () => {
+    if (!selectedWifiSsid) return showNotification('Please select a Wi-Fi network.', 'warning');
+    
+    setIsWifiConnecting(true);
+    showNotification(`Connecting to ${selectedWifiSsid}...`, 'info');
+    try {
+      const response = await fetch('/api/wifi/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ssid: selectedWifiSsid, password: wifiScanPassword })
+      });
+      const data = await response.json();
+      if (data.success) {
+        showNotification(data.message || `Successfully connected to ${selectedWifiSsid}!`, 'success');
+        
+        // 연결 성공 시 기기 폼 설정값 및 로컬스토리지에도 반영
+        localStorage.setItem('sf_wifi_ssid', selectedWifiSsid);
+        localStorage.setItem('sf_wifi_password', wifiScanPassword);
+        setWifiSsid(selectedWifiSsid);
+        setWifiPassword(wifiScanPassword);
+        
+        // Form 초기화
+        setWifiScanPassword('');
+        setSelectedWifiSsid('');
+      } else {
+        showNotification(data.error || 'Failed to connect to Wi-Fi.', 'error');
+      }
+    } catch (error: any) {
+      console.error(error);
+      showNotification('Error contacting Wi-Fi connection service.', 'error');
+    } finally {
+      setIsWifiConnecting(false);
+    }
   };
 
   // 센서 설정 모달이 열리거나 센서 종류(configSensor)를 변경할 때, 기존에 저장된 값을 폼에 불러오기
@@ -933,23 +1004,23 @@ import subprocess
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
-# 1. 환경 변수 로드 (.env)
+# 1. Load environment variables (.env)
 load_dotenv()
 
 # ==============================================================================
-# ⚠️ [사용자 환경 설정 - 필수 수정 항목] ⚠️
-# 라즈베리파이 등 배포하는 환경에 맞게 .env 파일을 생성하여 변수를 선언하거나,
-# 아래 os.getenv(...) 부분을 지우고 "자신의_실제_문자열_값"으로 직접 덮어쓰세요.
+# [WARNING] [User Settings - Required Configuration] [WARNING]
+# Create a .env file matching your deployment environment,
+# or replace os.getenv(...) calls directly with your real credentials.
 # ==============================================================================
 
-# 1. Supabase 설정
-# SUPABASE_URL: Supabase 프로젝트 URL (예: "https://xxxx.supabase.co")
-# SUPABASE_KEY: Supabase Service Role Key (보안 주의: 절대 외부에 노출하지 마세요)
+# 1. Supabase Configuration
+# SUPABASE_URL: Supabase Project URL (e.g., "https://xxxx.supabase.co")
+# SUPABASE_KEY: Supabase Service Role Key (Be careful: keep it secret!)
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("[오류] Supabase 설정이 누락되었습니다. 코드를 직접 수정하거나 .env를 설정하세요.")
+    raise ValueError("[Error] Supabase configuration is missing. Configure .env or edit the script.")
 
 # ==============================================================================
 
@@ -978,7 +1049,7 @@ while True:
     except Exception as e:
         print(f"Error checking status: {e}")
 
-    time.sleep(5) # 5초마다 웹 대시보드의 스위치 상태 확인
+    time.sleep(5) # Check dashboard switch status every 5 seconds
 `;
     setGeneratedAgentCode(agentCode);
     setIsAgentModalOpen(true);
@@ -1477,6 +1548,103 @@ while True:
                   <label className="block text-xs font-medium text-gray-700 mb-1">Password</label>
                   <input type="password" placeholder="Enter WiFi Password" value={sysWifiPass} onChange={e => setSysWifiPass(e.target.value)} className="w-full p-2 border border-gray-300 rounded focus:border-secondary outline-none text-sm" />
                 </div>
+              </div>
+            </div>
+
+            {/* WiFi Scan & Setup Config */}
+            <div className="bg-white rounded-xl p-6 shadow-sm border-t-4 border-emerald-500">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold text-primary flex items-center gap-2"><Wifi size={20}/> WiFi Scan & Setup</h3>
+                <button 
+                  onClick={handleScanWifi} 
+                  disabled={isWifiScanning}
+                  className="bg-secondary hover:bg-secondary/90 disabled:bg-gray-300 text-white px-3 py-1.5 rounded text-sm font-medium transition-colors flex items-center gap-1"
+                >
+                  {isWifiScanning ? 'Scanning...' : 'Scan Networks'}
+                </button>
+              </div>
+              <div className="flex flex-col gap-3">
+                <div className="bg-emerald-50 text-emerald-700 p-2 rounded text-[11px] border border-emerald-200">
+                  <strong>Network bridging enabled:</strong> You can scan real networks around this host and request connection directly.
+                </div>
+                
+                {scanWarningMessage && (
+                  <div className="bg-amber-50 text-amber-700 p-2 rounded text-[10px] border border-amber-200 leading-relaxed">
+                    ⚠️ {scanWarningMessage}
+                  </div>
+                )}
+
+                {/* Scanned networks list */}
+                {scannedWifiList.length > 0 ? (
+                  <div className="border border-gray-200 rounded-lg max-h-[220px] overflow-y-auto divide-y divide-gray-100 bg-gray-50">
+                    {scannedWifiList.map((net) => {
+                      const signalVal = parseInt(net.signal) || 0;
+                      return (
+                        <div 
+                          key={net.ssid} 
+                          onClick={() => {
+                            setSelectedWifiSsid(net.ssid);
+                            setWifiScanPassword('');
+                          }}
+                          className={`p-3 flex justify-between items-center cursor-pointer transition-colors ${selectedWifiSsid === net.ssid ? 'bg-secondary/10 hover:bg-secondary/15' : 'hover:bg-gray-100'}`}
+                        >
+                          <div>
+                            <p className="font-semibold text-sm text-gray-800 flex items-center gap-1.5">
+                              {net.ssid}
+                              {selectedWifiSsid === net.ssid && <span className="text-[10px] bg-secondary text-white px-1.5 py-0.5 rounded-full font-bold">Selected</span>}
+                            </p>
+                            <p className="text-[10px] text-gray-500">{net.security}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className={`text-xs font-semibold ${signalVal >= 70 ? 'text-success' : signalVal >= 40 ? 'text-warning' : 'text-danger'}`}>
+                              {net.signal}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center py-6 text-gray-400 text-xs border border-dashed border-gray-200 rounded-lg bg-gray-50">
+                    No networks scanned yet. Click 'Scan Networks' above.
+                  </div>
+                )}
+
+                {/* Connection Form when SSID is selected */}
+                {selectedWifiSsid && (
+                  <div className="mt-2 p-3 bg-gray-50 border border-gray-200 rounded-lg animate-in slide-in-from-top-2 duration-200">
+                    <p className="text-xs font-semibold text-gray-700 mb-2">
+                      Connect to: <span className="text-primary">{selectedWifiSsid}</span>
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      <div>
+                        <label className="block text-[10px] font-medium text-gray-600 mb-1">Wi-Fi Password</label>
+                        <input 
+                          type="password" 
+                          placeholder="Enter Password" 
+                          value={wifiScanPassword} 
+                          onChange={e => setWifiScanPassword(e.target.value)} 
+                          className="w-full p-2 border border-gray-300 rounded focus:border-secondary outline-none text-xs" 
+                        />
+                      </div>
+                      <div className="flex gap-2 justify-end mt-1">
+                        <button 
+                          onClick={() => setSelectedWifiSsid('')} 
+                          className="px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button 
+                          onClick={handleConnectWifi} 
+                          disabled={isWifiConnecting}
+                          className="bg-primary hover:bg-primary/90 text-white px-3 py-1.5 rounded text-xs font-medium transition-colors"
+                        >
+                          {isWifiConnecting ? 'Connecting...' : 'Connect'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
