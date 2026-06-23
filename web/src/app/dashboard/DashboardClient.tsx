@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { LayoutGrid, Play, Square, FolderOpen, SlidersHorizontal, CheckCircle, AlertTriangle, XCircle, Info, X, Cpu, Settings2, Users, CircuitBoard, Wifi, Copy, Download, Code, Server, Terminal, Database, Key, Cloud, FileCode2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase/client';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 
 // 알림(Notification) 타입을 정의하고 관리하는 커스텀 훅
 type NotificationType = 'success' | 'warning' | 'error' | 'info';
@@ -32,7 +33,7 @@ function useNotification() {
 function EquipmentItem({ 
   name, icon, details, description, isOn, onToggle, isActive = true, schedule
 }: { 
-  name: string, icon: string, details: string, description: string, isOn: boolean, onToggle: (state: boolean) => void, isActive?: boolean, schedule?: { start: string, stop: string }
+  name: string, icon: string, details: string, description: string, isOn: boolean, onToggle: (state: boolean) => void, isActive?: boolean, schedule?: { start: string, stop: string, isContinuous?: boolean }
 }) {
   return (
     <div className={`flex justify-between items-center p-5 bg-light rounded-xl transition-all ${isActive ? 'hover:bg-gray-200' : 'opacity-40 grayscale pointer-events-none'}`}>
@@ -58,8 +59,14 @@ function EquipmentItem({
         </div>
         {schedule && (
           <div className="text-xs text-gray-500 font-medium text-right mt-1">
-            <div className="mb-0.5">Start Time: {schedule.start}</div>
-            <div>Stop Time: {schedule.stop}</div>
+            {schedule.isContinuous ? (
+              <span className="text-secondary font-semibold">24-Hour Continuous</span>
+            ) : (
+              <>
+                <div className="mb-0.5">Start Time: {schedule.start}</div>
+                <div>Stop Time: {schedule.stop}</div>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -127,40 +134,74 @@ function useSupabaseSensors() {
   });
 
   useEffect(() => {
-    // 1. 페이지 로드 시 최신 데이터 1건 가져오기
+    // Helper function to extract all sensor values from a list of rows
+    const updateSensorsFromRows = (rows: any[]) => {
+      setSensors(prev => {
+        const next = { ...prev };
+        const found = {
+          temperature: false,
+          humidity: false,
+          light: false,
+          co2: false,
+          ph: false,
+          ec: false,
+          do: false
+        };
+
+        for (const row of rows) {
+          const payload = row.payload;
+          if (!payload) continue;
+
+          for (const key of Object.keys(found) as Array<keyof typeof found>) {
+            if (!found[key]) {
+              const val = extractSensorValue(payload, key);
+              if (val !== null) {
+                next[key] = val;
+                found[key] = true;
+              }
+            }
+          }
+          
+          if (Object.values(found).every(v => v)) break;
+        }
+        return next;
+      });
+    };
+
+    // 1. 페이지 로드 시 최신 데이터 20건 가져오기
     const fetchLatest = async () => {
       const { data, error } = await supabase
-        .from('sensor_data')
+        .from('dynamic_telemetry')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
+        .limit(20);
       
       if (data && !error) {
-        setSensors(prev => ({
-          ...prev,
-          temperature: data.temperature ?? prev.temperature,
-          humidity: data.humidity ?? prev.humidity,
-          light: data.light_intensity ?? prev.light,
-        }));
+        updateSensorsFromRows(data);
       }
     };
     fetchLatest();
 
-    // 2. data-logger.py가 DB에 새 데이터를 INSERT 할 때마다 실시간 수신
+    // 2. 새로운 데이터가 INSERT 될 때마다 실시간 수신
     const channel = supabase
-      .channel('realtime-sensor-data')
+      .channel('realtime-dynamic-telemetry-sensors')
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'sensor_data' },
+        { event: 'INSERT', schema: 'public', table: 'dynamic_telemetry' },
         (payload) => {
           const newData = payload.new;
-          setSensors(prev => ({
-            ...prev,
-            temperature: newData.temperature ?? prev.temperature,
-            humidity: newData.humidity ?? prev.humidity,
-            light: newData.light_intensity ?? prev.light,
-          }));
+          if (newData && newData.payload) {
+            setSensors(prev => {
+              const next = { ...prev };
+              (Object.keys(prev) as Array<keyof typeof prev>).forEach(key => {
+                const val = extractSensorValue(newData.payload, key);
+                if (val !== null) {
+                  next[key] = val;
+                }
+              });
+              return next;
+            });
+          }
         }
       )
       .subscribe();
@@ -175,7 +216,7 @@ function useSupabaseSensors() {
 
 // 시스템 설정(센서/기기 사용 여부)을 관리하는 커스텀 훅
 function useSystemSettings() {
-  const [activeSensors, setActiveSensors] = useState({
+  const [activeSensors, setActiveSensors] = useState<Record<string, boolean>>({
     temperature: true, humidity: true, light: true, co2: true, ph: true, ec: true, do: true
   });
   const [activeEquipment, setActiveEquipment] = useState<Record<string, boolean>>({
@@ -202,9 +243,10 @@ function useSystemSettings() {
     loadSettings();
   }, []);
 
-  const toggleSensor = (key: keyof typeof activeSensors) => {
+  const toggleSensor = (key: string) => {
     setActiveSensors(prev => {
-      const next = { ...prev, [key]: !prev[key] };
+      const currentVal = prev[key] !== false; // 하위 호환 및 커스텀 지원
+      const next = { ...prev, [key]: !currentVal };
       localStorage.setItem('sf_active_sensors', JSON.stringify(next));
       supabase.from('app_settings').upsert({ key: 'sf_active_sensors', value: next }).then();
       return next;
@@ -338,7 +380,80 @@ CREATE TABLE app_settings (
 
 -- 누구나 쉽게 읽고 쓸 수 있도록 RLS(Row Level Security) 권한 개방
 ALTER TABLE app_settings ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow public read and write" ON app_settings FOR ALL USING (true) WITH CHECK (true);`;
+CREATE POLICY "Allow public read and write" ON app_settings FOR ALL USING (true) WITH CHECK (true);
+
+-- 3. 실시간 차트 업데이트를 위한 설정
+-- dynamic_telemetry 테이블을 supabase_realtime 복제 목록에 추가
+ALTER PUBLICATION supabase_realtime ADD TABLE dynamic_telemetry;`;
+
+const SENSOR_METADATA: Record<string, { label: string; unit: string; color: string; keys: string[] }> = {
+  temperature: { label: 'Temperature', unit: '°C', color: '#e74c3c', keys: ['temp', 'temperature'] },
+  humidity: { label: 'Humidity', unit: '%', color: '#3498db', keys: ['humid', 'humidity'] },
+  light: { label: 'Light Intensity', unit: 'µmol/m²s', color: '#f1c40f', keys: ['ppfd', 'light_intensity', 'light'] },
+  co2: { label: 'Carbon Dioxide', unit: 'ppm', color: '#1abc9c', keys: ['co2', 'carbon_dioxide'] },
+  ph: { label: 'Hydrogen Ion Concentration', unit: 'pH', color: '#9b59b6', keys: ['ph', 'hydrogen_ion_concentration'] },
+  ec: { label: 'Electrical Conductivity', unit: 'dS/m', color: '#e67e22', keys: ['ec', 'electrical_conductivity'] },
+  do: { label: 'Dissolved Oxygen', unit: 'mg/L', color: '#2ecc71', keys: ['do', 'dissolved_oxygen'] }
+};
+
+function extractSensorValue(payload: any, sensorKey: string): number | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const meta = SENSOR_METADATA[sensorKey];
+  if (!meta) return null;
+  for (const dbKey of meta.keys) {
+    if (payload[dbKey] !== undefined && payload[dbKey] !== null) {
+      const val = Number(payload[dbKey]);
+      if (!isNaN(val)) return val;
+    }
+  }
+  return null;
+}
+
+function getWeatherIcon(code: number | undefined): string {
+  if (code === undefined || code === null) return 'mdi-weather-partly-cloudy text-gray-300';
+  if (code === 0) return 'mdi-weather-sunny text-amber-400';
+  if ([1, 2, 3].includes(code)) return 'mdi-weather-partly-cloudy text-sky-200';
+  if ([45, 48].includes(code)) return 'mdi-weather-fog text-gray-400';
+  if ([51, 53, 55, 61, 63, 65, 80, 81, 82].includes(code)) return 'mdi-weather-pouring text-blue-300 animate-pulse';
+  if ([71, 73, 75, 85, 86].includes(code)) return 'mdi-weather-snowy text-blue-100';
+  if ([95, 96, 99].includes(code)) return 'mdi-weather-lightning-rainy text-yellow-300';
+  return 'mdi-weather-partly-cloudy text-gray-300';
+}
+
+const createXAxisTick = (dataPoints: any[]) => {
+  const renderedDates = new Set<string>();
+  return (props: any) => {
+    const { x, y, payload, index } = props;
+    if (!payload || !payload.value) return null;
+
+    const parts = payload.value.split('|');
+    const timeStr = parts[0] || '';
+    const dateStr = parts[1] || '';
+    
+    if (index === 0) {
+      renderedDates.clear();
+    }
+
+    let showDate = false;
+    if (dateStr && !renderedDates.has(dateStr)) {
+      showDate = true;
+      renderedDates.add(dateStr);
+    }
+
+    return (
+      <g transform={`translate(${x},${y})`}>
+        <text x={0} y={16} textAnchor="middle" fill="#666" fontSize={10}>
+          <tspan x={0} dy="0">{timeStr}</tspan>
+          {showDate && dateStr && (
+            <tspan x={0} dy="13" fontWeight="600" fill="#2c3e50">
+              {dateStr}
+            </tspan>
+          )}
+        </text>
+      </g>
+    );
+  };
+};
 
 export default function DashboardClient() {
   const searchParams = useSearchParams();
@@ -349,6 +464,243 @@ export default function DashboardClient() {
   // 💡 여기서 설정한 값들을 꺼내옵니다. 이 코드가 누락되어서 에러가 발생했었습니다!
   const { activeSensors, activeEquipment, toggleSensor, toggleEquipmentSetting } = useSystemSettings();
   const equipmentNamesList = { circulationFan: 'Circulation Fan', growLight: 'Grow Light', hvac: 'HVAC', humidifier: 'Humidifier', co2Generator: 'CO2 Generator', waterPump: 'Water Pump', solenoidValve: 'Solenoid Valve', dosingPump: 'Dosing Pump', airPump: 'Air Pump' };
+
+  // Home tab states
+  const [weatherData, setWeatherData] = useState<any>(null);
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [weatherError, setWeatherError] = useState<string | null>(null);
+  const [dbConnected, setDbConnected] = useState<boolean>(true);
+  const [locationName, setLocationName] = useState<string>('Detecting location...');
+
+  const fetchWeather = async (lat: number, lon: number, locationLabel: string) => {
+    setWeatherLoading(true);
+    setWeatherError(null);
+    try {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,dew_point_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m&daily=sunrise,sunset&timezone=auto`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Failed to fetch weather data.');
+      const data = await response.json();
+      
+      const current = data.current;
+      const daily = data.daily;
+      
+      setWeatherData({
+        temp: current.temperature_2m,
+        humidity: current.relative_humidity_2m,
+        dewPoint: current.dew_point_2m,
+        precipitation: current.precipitation,
+        weatherCode: current.weather_code,
+        windSpeed: current.wind_speed_10m,
+        windDir: current.wind_direction_10m,
+        sunrise: daily?.sunrise?.[0] ? new Date(daily.sunrise[0]).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : '--:--',
+        sunset: daily?.sunset?.[0] ? new Date(daily.sunset[0]).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : '--:--'
+      });
+      setLocationName(locationLabel);
+    } catch (err: any) {
+      console.error(err);
+      setWeatherError('Failed to load weather data');
+      showNotification('Failed to retrieve weather information.', 'warning');
+    } finally {
+      setWeatherLoading(false);
+    }
+  };
+
+  const getAndFetchLocation = async () => {
+    let resolvedCity = 'Seoul, South Korea';
+    let lat = 37.5665;
+    let lon = 126.9780;
+    let isDefault = true;
+
+    // 1. Try to get city name & rough coordinates from IP lookup first
+    try {
+      const response = await fetch('https://ipapi.co/json/');
+      if (response.ok) {
+        const data = await response.json();
+        if (data.latitude && data.longitude) {
+          resolvedCity = data.city ? `${data.city}, ${data.country_name}` : 'Estimated Location';
+          lat = data.latitude;
+          lon = data.longitude;
+          isDefault = false;
+        }
+      }
+    } catch (e) {
+      console.warn('IP lookup failed:', e);
+    }
+
+    // 2. Try to get precise GPS coordinates from browser Geolocation if supported
+    if (typeof window !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const gpsLat = position.coords.latitude;
+          const gpsLon = position.coords.longitude;
+          const label = `${resolvedCity} (경도: ${gpsLon.toFixed(4)}, 위도: ${gpsLat.toFixed(4)})`;
+          fetchWeather(gpsLat, gpsLon, label);
+        },
+        (error) => {
+          console.warn('GPS location failed/denied:', error.message);
+          const label = `${resolvedCity} (경도: ${lon.toFixed(4)}, 위도: ${lat.toFixed(4)})${isDefault ? ' (Default)' : ''}`;
+          fetchWeather(lat, lon, label);
+        },
+        { timeout: 5000 }
+      );
+    } else {
+      const label = `${resolvedCity} (경도: ${lon.toFixed(4)}, 위도: ${lat.toFixed(4)})${isDefault ? ' (Default)' : ''}`;
+      fetchWeather(lat, lon, label);
+    }
+  };
+
+  const checkDbConnection = async () => {
+    try {
+      const { error } = await supabase.from('app_settings').select('key').limit(1);
+      if (error) throw error;
+      setDbConnected(true);
+    } catch (err) {
+      console.error('Supabase connection check failed:', err);
+      setDbConnected(false);
+    }
+  };
+
+  useEffect(() => {
+    if (currentTab === 'home') {
+      getAndFetchLocation();
+      checkDbConnection();
+      
+      const interval = setInterval(() => {
+        checkDbConnection();
+      }, 30000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [currentTab]);
+
+  // 💡 Dashboard Charts states
+  const [dashboardMode, setDashboardMode] = useState<'realtime' | 'custom'>('realtime');
+  const [startDate, setStartDate] = useState(() => {
+    const today = new Date();
+    return today.toLocaleDateString('en-CA');
+  });
+  const [endDate, setEndDate] = useState(() => {
+    const today = new Date();
+    return today.toLocaleDateString('en-CA');
+  });
+  const [chartData, setChartData] = useState<Record<string, { time: string; timestamp: number; value: number }[]>>({
+    temperature: [],
+    humidity: [],
+    light: [],
+    co2: [],
+    ph: [],
+    ec: [],
+    do: []
+  });
+  const [isChartLoading, setIsChartLoading] = useState(false);
+
+  const fetchDashboardData = async (mode: 'realtime' | 'custom', startStr?: string, endStr?: string) => {
+    setIsChartLoading(true);
+    try {
+      let query = supabase
+        .from('dynamic_telemetry')
+        .select('created_at, payload')
+        .order('created_at', { ascending: true });
+
+      if (mode === 'realtime') {
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        query = query.gte('created_at', oneDayAgo);
+      } else if (startStr && endStr) {
+        const startLocal = new Date(`${startStr}T00:00:00`);
+        const endLocal = new Date(`${endStr}T23:59:59.999`);
+        
+        query = query
+          .gte('created_at', startLocal.toISOString())
+          .lte('created_at', endLocal.toISOString());
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const processed: Record<string, { time: string; timestamp: number; value: number }[]> = {
+        temperature: [], humidity: [], light: [], co2: [], ph: [], ec: [], do: []
+      };
+
+      if (data) {
+        data.forEach((row: any) => {
+          const date = new Date(row.created_at);
+          const timestamp = date.getTime();
+          const timeStr = date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+          Object.keys(processed).forEach(sensorKey => {
+            const val = extractSensorValue(row.payload, sensorKey);
+            if (val !== null) {
+              let displayTime = '';
+              if (mode === 'realtime') {
+                displayTime = `${timeStr}|`;
+              } else {
+                const formattedDateStr = `${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`;
+                displayTime = `${timeStr}|${formattedDateStr}`;
+              }
+
+              processed[sensorKey].push({
+                time: displayTime,
+                timestamp,
+                value: val
+              });
+            }
+          });
+        });
+      }
+
+      setChartData(processed);
+    } catch (err: any) {
+      console.error('Error fetching dashboard chart data:', err);
+      showNotification(`Failed to load chart data: ${err.message}`, 'error');
+    } finally {
+      setIsChartLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboardData(dashboardMode, startDate, endDate);
+
+    if (dashboardMode !== 'realtime') return;
+
+    const channel = supabase
+      .channel('realtime-telemetry')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'dynamic_telemetry' },
+        (payload) => {
+          console.log('Realtime telemetry event received:', payload);
+          const newRow = payload.new;
+          if (!newRow) return;
+
+          const date = new Date(newRow.created_at);
+          const timestamp = date.getTime();
+          const timeStr = date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+          setChartData(prev => {
+            const updated = { ...prev };
+            const limitTime = Date.now() - 24 * 60 * 60 * 1000;
+
+            Object.keys(updated).forEach(sensorKey => {
+              const val = extractSensorValue(newRow.payload, sensorKey);
+              if (val !== null) {
+                const filtered = updated[sensorKey].filter(item => item.timestamp >= limitTime);
+                const displayTime = `${timeStr}|`;
+                updated[sensorKey] = [...filtered, { time: displayTime, timestamp, value: val }];
+              }
+            });
+
+            return updated;
+          });
+        }
+      )
+      .subscribe((status) => {
+        console.log('Realtime telemetry subscription status:', status);
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [dashboardMode]);
 
   // Auth Status (Supabase)
   const [user, setUser] = useState<any>(null);
@@ -410,6 +762,23 @@ export default function DashboardClient() {
   const [newEqDesc, setNewEqDesc] = useState('');
   const [customEquipments, setCustomEquipments] = useState<{id: string, name: string, description: string}[]>([]);
 
+  // 커스텀 센서 추가 관련 상태
+  interface CustomSensor {
+    id: string;
+    name: string;
+    samplingRateValue: number;
+    samplingRateUnit: string;
+    lowerLimit: number;
+    upperLimit: number;
+  }
+  const [isAddSensorModalOpen, setIsAddSensorModalOpen] = useState(false);
+  const [newSensorName, setNewSensorName] = useState('');
+  const [newSensorRateValue, setNewSensorRateValue] = useState('10');
+  const [newSensorRateUnit, setNewSensorRateUnit] = useState('second');
+  const [newSensorLower, setNewSensorLower] = useState('');
+  const [newSensorUpper, setNewSensorUpper] = useState('');
+  const [customSensors, setCustomSensors] = useState<CustomSensor[]>([]);
+
   // 커스텀 장비 설정 로드
   useEffect(() => {
     const loadCustomEq = async () => {
@@ -429,6 +798,22 @@ export default function DashboardClient() {
     loadCustomEq();
   }, []);
 
+  // 커스텀 센서 설정 로드
+  useEffect(() => {
+    const loadCustomSensors = async () => {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', 'sf_custom_sensors').single();
+      let parsed = data?.value;
+      if (!parsed) {
+        const saved = localStorage.getItem('sf_custom_sensors');
+        if (saved) parsed = JSON.parse(saved);
+      }
+      if (parsed) {
+        setCustomSensors(parsed);
+      }
+    };
+    loadCustomSensors();
+  }, []);
+
   const handleSaveCustomEquipment = async () => {
     if (!newEqName.trim()) return showNotification('Please enter the equipment name.', 'warning');
     const newEq = { id: `custom_${Date.now()}`, name: newEqName, description: newEqDesc };
@@ -443,6 +828,50 @@ export default function DashboardClient() {
     setNewEqDesc('');
   };
 
+  const handleSaveCustomSensor = async () => {
+    if (!newSensorName.trim()) return showNotification('Please enter the sensor name.', 'warning');
+    if (!newSensorLower.trim() || !newSensorUpper.trim()) return showNotification('Please enter both lower and upper limits.', 'warning');
+    
+    const lower = parseFloat(newSensorLower);
+    const upper = parseFloat(newSensorUpper);
+    if (isNaN(lower) || isNaN(upper)) return showNotification('Limits must be numbers.', 'error');
+    if (lower >= upper) return showNotification('Lower limit must be less than upper limit.', 'error');
+
+    const newSensor: CustomSensor = {
+      id: `custom_sensor_${Date.now()}`,
+      name: newSensorName,
+      samplingRateValue: parseFloat(newSensorRateValue) || 10,
+      samplingRateUnit: newSensorRateUnit,
+      lowerLimit: lower,
+      upperLimit: upper
+    };
+
+    const configKey = `sf_sensor_config_${newSensorName.replace(/\s+/g, '_')}`;
+    const initialConfig = {
+      samplingRateValue: parseFloat(newSensorRateValue) || 10,
+      samplingRateUnit: newSensorRateUnit,
+      samplingRate: (parseFloat(newSensorRateValue) || 10) * (newSensorRateUnit === 'minute' ? 60 : newSensorRateUnit === 'hour' ? 3600 : 1),
+      lowerThreshold: lower,
+      upperThreshold: upper,
+      lastUpdated: new Date().toISOString()
+    };
+    await supabase.from('app_settings').upsert({ key: configKey, value: initialConfig });
+    localStorage.setItem(configKey, JSON.stringify(initialConfig));
+
+    const updatedList = [...customSensors, newSensor];
+    setCustomSensors(updatedList);
+    await supabase.from('app_settings').upsert({ key: 'sf_custom_sensors', value: updatedList });
+    localStorage.setItem('sf_custom_sensors', JSON.stringify(updatedList));
+    showNotification(`${newSensorName} added successfully!`, 'success');
+    
+    setIsAddSensorModalOpen(false);
+    setNewSensorName('');
+    setNewSensorRateValue('10');
+    setNewSensorRateUnit('second');
+    setNewSensorLower('');
+    setNewSensorUpper('');
+  };
+
   // 장비 스케줄 설정 관련 상태
   const [isEquipConfigModalOpen, setIsEquipConfigModalOpen] = useState(false);
   const [configEquip, setConfigEquip] = useState('circulationFan');
@@ -452,7 +881,8 @@ export default function DashboardClient() {
   const [equipStopAmPm, setEquipStopAmPm] = useState('PM');
   const [equipStopHour, setEquipStopHour] = useState('06');
   const [equipStopMinute, setEquipStopMinute] = useState('00');
-  const [equipSchedules, setEquipSchedules] = useState<Record<string, { start: string, stop: string }>>({});
+  const [equipIsContinuous, setEquipIsContinuous] = useState(false);
+  const [equipSchedules, setEquipSchedules] = useState<Record<string, { start: string, stop: string, isContinuous?: boolean }>>({});
 
   const loadAllEquipSchedules = async () => {
     const equipList = [...Object.keys(equipmentNamesList), ...customEquipments.map(eq => eq.id)];
@@ -482,6 +912,7 @@ export default function DashboardClient() {
     if (isEquipConfigModalOpen) {
       const schedule = equipSchedules[configEquip];
       if (schedule) {
+        setEquipIsContinuous(schedule.isContinuous === true);
         const [sAmPm, sTime] = schedule.start.split(' ');
         const [sHr, sMin] = sTime.split(':');
         setEquipStartAmPm(sAmPm);
@@ -494,6 +925,7 @@ export default function DashboardClient() {
         setEquipStopHour(stHr);
         setEquipStopMinute(stMin);
       } else {
+        setEquipIsContinuous(false);
         setEquipStartAmPm('AM');
         setEquipStartHour('08');
         setEquipStartMinute('00');
@@ -507,7 +939,7 @@ export default function DashboardClient() {
   const handleSaveEquipSchedule = async () => {
     const startStr = `${equipStartAmPm} ${equipStartHour.padStart(2, '0')}:${equipStartMinute.padStart(2, '0')}`;
     const stopStr = `${equipStopAmPm} ${equipStopHour.padStart(2, '0')}:${equipStopMinute.padStart(2, '0')}`;
-    const scheduleData = { start: startStr, stop: stopStr };
+    const scheduleData = { start: startStr, stop: stopStr, isContinuous: equipIsContinuous };
 
     const key = `sf_equip_schedule_${configEquip}`;
     await supabase.from('app_settings').upsert({ key, value: scheduleData });
@@ -643,7 +1075,20 @@ export default function DashboardClient() {
   const [sensorConfigs, setSensorConfigs] = useState<Record<string, { lowerThreshold: number, upperThreshold: number, samplingRate: string | number, samplingRateValue?: number, samplingRateUnit?: string }>>({});
 
   const loadAllSensorConfigs = async () => {
-    const sensorsList = ["Temperature", "Light Intensity", "Humidity", "Hydrogen Ion Concentration", "Electrical Conductivity", "Dissolved Oxygen", "Carbon Dioxide"];
+    const savedCustom = localStorage.getItem('sf_custom_sensors');
+    const parsedCustom = savedCustom ? JSON.parse(savedCustom) : [];
+    const customNames = parsedCustom.map((s: any) => s.name);
+
+    const sensorsList = [
+      "Temperature",
+      "Light Intensity",
+      "Humidity",
+      "Hydrogen Ion Concentration",
+      "Electrical Conductivity",
+      "Dissolved Oxygen",
+      "Carbon Dioxide",
+      ...customNames
+    ];
     const newConfigs: Record<string, any> = {};
     
     const keys = sensorsList.map(s => `sf_sensor_config_${s.replace(/\s+/g, '_')}`);
@@ -656,7 +1101,19 @@ export default function DashboardClient() {
         newConfigs[s] = dbItem.value;
       } else {
         const saved = localStorage.getItem(key);
-        if (saved) newConfigs[s] = JSON.parse(saved);
+        if (saved) {
+          newConfigs[s] = JSON.parse(saved);
+        } else {
+          const customSensor = parsedCustom.find((cs: any) => cs.name === s);
+          if (customSensor) {
+            newConfigs[s] = {
+              samplingRateValue: customSensor.samplingRateValue,
+              samplingRateUnit: customSensor.samplingRateUnit,
+              lowerThreshold: customSensor.lowerLimit,
+              upperThreshold: customSensor.upperLimit
+            };
+          }
+        }
       }
     });
     setSensorConfigs(newConfigs);
@@ -664,7 +1121,7 @@ export default function DashboardClient() {
 
   useEffect(() => {
     loadAllSensorConfigs();
-  }, []);
+  }, [customSensors]);
   
   // 아두이노 핀 연결 상태 관리
   // 사용자가 쉽게 테스트할 수 있도록 자주 쓰이는 센서/기기를 기본값으로 세팅
@@ -1111,12 +1568,12 @@ while True:
   };
 
   const tempStatus = getSensorStatus('Temperature', sensors.temperature, activeSensors.temperature, 'Normal');
-  const humStatus = getSensorStatus('Humidity', sensors.humidity, activeSensors.humidity, 'Optimal');
+  const humStatus = getSensorStatus('Humidity', sensors.humidity, activeSensors.humidity, 'Normal');
   const lightStatus = getSensorStatus('Light Intensity', sensors.light, activeSensors.light, 'Normal');
-  const co2Status = getSensorStatus('Carbon Dioxide', sensors.co2, activeSensors.co2, 'Optimal');
-  const phStatus = getSensorStatus('Hydrogen Ion Concentration', sensors.ph, activeSensors.ph, 'Optimal');
-  const ecStatus = getSensorStatus('Electrical Conductivity', sensors.ec, activeSensors.ec, 'Optimal');
-  const doStatus = getSensorStatus('Dissolved Oxygen', sensors.do, activeSensors.do, 'Optimal');
+  const co2Status = getSensorStatus('Carbon Dioxide', sensors.co2, activeSensors.co2, 'Normal');
+  const phStatus = getSensorStatus('Hydrogen Ion Concentration', sensors.ph, activeSensors.ph, 'Normal');
+  const ecStatus = getSensorStatus('Electrical Conductivity', sensors.ec, activeSensors.ec, 'Normal');
+  const doStatus = getSensorStatus('Dissolved Oxygen', sensors.do, activeSensors.do, 'Normal');
 
   // 다중 선택 드롭다운 옵션 정의
   const mappingOptions = [
@@ -1145,30 +1602,509 @@ while True:
 
   return (
     <div className="animate-[fadeIn_0.5s_ease-in-out] w-full">
-      {currentTab === 'dashboard' && (
-        <div>
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-semibold text-primary">Dashboard Overview</h2>
-            <div className="flex gap-4">
-              <button onClick={() => showNotification('Starting all systems...', 'success')} className="flex items-center gap-2 bg-secondary hover:bg-secondary/90 text-white px-4 py-2 rounded-lg transition-all">
-                <Play size={18} /> Start All
+      {currentTab === 'home' && (
+        <div className="animate-[fadeIn_0.5s_ease-in-out] w-full space-y-6">
+          {/* Welcome User Section */}
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-2xl shadow-[0_4px_20px_rgba(0,0,0,0.03)] border border-gray-100">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-full bg-gradient-to-tr from-primary to-secondary flex items-center justify-center text-white font-bold text-xl shadow-md">
+                {user ? user.email[0].toUpperCase() : 'G'}
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-primary">Pooh's Smart Farm</h2>
+                <p className="text-sm text-gray-500 font-medium">
+                  {user ? `Logged in as: ${user.email}` : 'Guest User (Login Recommended)'}
+                </p>
+              </div>
+            </div>
+            {user ? (
+              <button onClick={handleLogout} className="bg-light hover:bg-gray-200 text-danger border border-danger/30 hover:border-danger px-5 py-2.5 rounded-full text-sm font-semibold transition-all">
+                Sign Out
               </button>
-              <button 
-                onClick={() => {
-                  if(confirm('Are you sure you want to execute emergency stop? This will halt all operations.')) showNotification('Emergency stop activated! All systems halted.', 'error');
-                }} 
-                className="flex items-center gap-2 bg-danger hover:bg-danger/90 text-white px-4 py-2 rounded-lg transition-all"
-              >
-                <Square size={18} /> Emergency Stop
+            ) : (
+              <button onClick={handleGoogleLogin} className="bg-primary hover:bg-primary/90 text-white px-5 py-2.5 rounded-full text-sm font-semibold transition-all shadow-md">
+                Sign in with Google
               </button>
+            )}
+          </div>
+
+          {/* Grid Layout: Weather and System connections */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            {/* Weather Card - Glassmorphism style */}
+            <div className={`lg:col-span-2 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden transition-all duration-500 hover:shadow-2xl flex flex-col justify-between min-h-[320px] bg-gradient-to-br from-indigo-900 to-indigo-950`}>
+              {/* Background abstract graphic elements */}
+              <div className="absolute right-[-40px] top-[-40px] w-48 h-48 rounded-full bg-indigo-500/20 blur-3xl pointer-events-none" />
+              <div className="absolute left-[-20px] bottom-[-20px] w-36 h-36 rounded-full bg-blue-500/10 blur-2xl pointer-events-none" />
+
+              <div>
+                <div className="flex justify-between items-center mb-4">
+                  <div className="flex items-center gap-2">
+                    <i className="mdi mdi-map-marker text-xl text-secondary"></i>
+                    <span className="font-semibold text-sm tracking-wide">{locationName}</span>
+                  </div>
+                  <span className="bg-white/10 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider backdrop-blur-md">Local Weather</span>
+                </div>
+
+                {weatherLoading ? (
+                  <div className="py-12 text-center flex flex-col items-center justify-center">
+                    <div className="animate-spin inline-block w-8 h-8 border-4 border-white border-t-transparent rounded-full mb-3" />
+                    <p className="text-white/80 text-sm">Synchronizing live climate data...</p>
+                  </div>
+                ) : weatherError ? (
+                  <div className="py-12 text-center text-white/70 text-sm font-medium">
+                    <i className="mdi mdi-cloud-alert text-4xl mb-2 block"></i>
+                    {weatherError}
+                  </div>
+                ) : weatherData ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+                    <div>
+                      <div className="flex items-center gap-4 mb-2">
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-6xl font-black tracking-tight">{weatherData.temp.toFixed(1)}</span>
+                          <span className="text-3xl font-light">°C</span>
+                        </div>
+                        <i className={`mdi ${getWeatherIcon(weatherData.weatherCode)} text-5xl ml-2`}></i>
+                      </div>
+                      <p className="text-white/80 text-sm font-medium">
+                        Precipitation: <span className="text-white font-bold">{weatherData.precipitation} mm</span>
+                      </p>
+                      
+                      {/* Severe Weather Alert check */}
+                      {weatherData.precipitation > 10 ? (
+                        <div className="mt-4 bg-danger/25 border border-danger/40 text-white rounded-lg p-2.5 text-xs flex items-center gap-2 animate-[pulse_2s_infinite]">
+                          <i className="mdi mdi-alert-circle text-lg"></i>
+                          <span className="font-semibold">Heavy Rain Alert! Protect facilities.</span>
+                        </div>
+                      ) : weatherData.windSpeed > 10 ? (
+                        <div className="mt-4 bg-warning/20 border border-warning/40 text-white rounded-lg p-2.5 text-xs flex items-center gap-2 animate-[pulse_2s_infinite]">
+                          <i className="mdi mdi-weather-windy text-lg"></i>
+                          <span className="font-semibold">Strong Wind Alert! Check ventilation doors.</span>
+                        </div>
+                      ) : weatherData.temp > 35 ? (
+                        <div className="mt-4 bg-danger/25 border border-danger/40 text-white rounded-lg p-2.5 text-xs flex items-center gap-2">
+                          <i className="mdi mdi-thermometer-alert text-lg"></i>
+                          <span className="font-semibold">Extreme Heat Warning! Optimize HVAC systems.</span>
+                        </div>
+                      ) : weatherData.temp < 0 ? (
+                        <div className="mt-4 bg-info/20 border border-info/40 text-white rounded-lg p-2.5 text-xs flex items-center gap-2">
+                          <i className="mdi mdi-snowflake text-lg"></i>
+                          <span className="font-semibold">Frost Warning! Turn on internal heaters.</span>
+                        </div>
+                      ) : (
+                        <div className="mt-4 bg-success/20 border border-success/45 text-white rounded-lg p-2.5 text-xs flex items-center gap-2">
+                          <i className="mdi mdi-check-circle text-base text-success"></i>
+                          <span className="font-semibold text-white/95">Weather conditions are safe. Normal operation.</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-y-4 gap-x-2 bg-white/5 p-4 rounded-xl backdrop-blur-md border border-white/10 text-xs">
+                      <div className="flex items-center gap-2">
+                        <i className="mdi mdi-water text-base text-sky-400"></i>
+                        <div>
+                          <div className="text-white/60 font-medium">Humidity</div>
+                          <div className="font-bold text-white">{weatherData.humidity} %</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <i className="mdi mdi-weather-windy text-base text-teal-300"></i>
+                        <div>
+                          <div className="text-white/60 font-medium">Wind Speed</div>
+                          <div className="font-bold text-white">{weatherData.windSpeed} m/s</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <i className="mdi mdi-thermometer-water text-base text-purple-300"></i>
+                        <div>
+                          <div className="text-white/60 font-medium">Dew Point</div>
+                          <div className="font-bold text-white">{weatherData.dewPoint} °C</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <i className="mdi mdi-weather-sunset-up text-base text-amber-400"></i>
+                        <div>
+                          <div className="text-white/60 font-medium">Sun Rise/Set</div>
+                          <div className="font-bold text-white">{weatherData.sunrise} / {weatherData.sunset}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-12 text-center text-white/50 text-xs">Awaiting geographical lookup...</div>
+                )}
+              </div>
+              <p className="text-[10px] text-white/40 mt-4 text-right">Data provided by Open-Meteo API (No Key)</p>
+            </div>
+
+            {/* Connection Information */}
+            <div className="bg-white rounded-2xl p-6 shadow-[0_4px_20px_rgba(0,0,0,0.03)] border border-gray-100 flex flex-col justify-between space-y-4">
+              <h3 className="text-lg font-bold text-primary flex items-center gap-2">
+                <span className="w-1.5 h-4 bg-secondary rounded-full"></span>
+                System Connection
+              </h3>
+              
+              <div className="space-y-3.5">
+                {/* WiFi SSID Card */}
+                <div className="flex justify-between items-center p-3.5 bg-light rounded-xl hover:bg-gray-200 transition-colors">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-secondary/10 flex items-center justify-center text-secondary">
+                      <i className="mdi mdi-wifi text-lg"></i>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Wi-Fi Network</span>
+                      <span className="text-sm font-bold text-primary">{wifiSsid || 'Not configured'}</span>
+                    </div>
+                  </div>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${wifiSsid ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>
+                    {wifiSsid ? 'Wired' : 'Offline'}
+                  </span>
+                </div>
+
+                {/* MQTT Broker Card */}
+                <div className="flex justify-between items-center p-3.5 bg-light rounded-xl hover:bg-gray-200 transition-colors">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-info/10 flex items-center justify-center text-info">
+                      <i className="mdi mdi-server-network text-lg"></i>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] text-gray-400 font-semibold uppercase tracking-wider">MQTT Broker</span>
+                      <span className="text-sm font-bold text-primary truncate max-w-[120px] block">
+                        {mqttServer ? (mqttServer.includes('hivemq') ? 'HiveMQ Cloud' : mqttServer.split(':')[0]) : 'Not configured'}
+                      </span>
+                    </div>
+                  </div>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${mqttServer ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>
+                    {mqttServer ? 'Connected' : 'Offline'}
+                  </span>
+                </div>
+
+                {/* Supabase Connection */}
+                <div className="flex justify-between items-center p-3.5 bg-light rounded-xl hover:bg-gray-200 transition-colors">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                      <i className="mdi mdi-database text-lg"></i>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Supabase DB</span>
+                      <span className="text-sm font-bold text-primary">Data Warehouse</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`w-2 h-2 rounded-full inline-block ${dbConnected ? 'bg-success animate-pulse' : 'bg-danger'}`}></span>
+                    <span className={`text-[10px] font-bold ${dbConnected ? 'text-success' : 'text-danger'}`}>
+                      {dbConnected ? 'Healthy' : 'Disconnected'}
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="p-10 text-center text-gray-500 bg-white rounded-xl border border-dashed border-gray-300 shadow-sm">
-            <LayoutGrid className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-            <p className="text-lg">Dashboard content has been cleared to focus purely on Sensor Monitoring and Equipment Control.</p>
-            <p className="text-sm mt-2">Please select 'Sensor Monitoring' or 'Equipment Control' from the sidebar.</p>
+          {/* Active Devices (Sensors and Actuators) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
+            
+            {/* Active Sensors */}
+            <div className="bg-white rounded-2xl p-6 shadow-[0_4px_20px_rgba(0,0,0,0.03)] border border-gray-100">
+              <h3 className="text-lg font-bold text-primary mb-4 flex items-center gap-2">
+                <span className="w-1.5 h-4 bg-primary rounded-full"></span>
+                Active Sensors Grid
+              </h3>
+              
+              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
+                {/* Check default active sensors */}
+                {Object.entries({ 
+                  temperature: { label: 'Temperature', icon: 'mdi-thermometer' },
+                  humidity: { label: 'Humidity', icon: 'mdi-water-percent' },
+                  light: { label: 'Light Intensity', icon: 'mdi-white-balance-sunny' },
+                  co2: { label: 'Carbon Dioxide', icon: 'mdi-molecule-co2' },
+                  ph: { label: 'pH Sensor', icon: 'mdi-flask' },
+                  ec: { label: 'EC Sensor', icon: 'mdi-lightning-bolt' },
+                  do: { label: 'DO Sensor', icon: 'mdi-chart-bubble' }
+                }).map(([key, meta]) => {
+                  const isActive = activeSensors[key] !== false;
+                  if (!isActive) return null;
+                  return (
+                    <div key={key} className="relative flex flex-col items-center justify-center p-4 bg-light rounded-xl border border-gray-150 hover:bg-gray-200 transition-all text-center h-[105px] shadow-sm">
+                      <i className={`mdi ${meta.icon} text-3xl text-secondary mb-2`}></i>
+                      <span className="text-[11px] font-bold text-gray-700 leading-tight">{meta.label}</span>
+                    </div>
+                  );
+                })}
+
+                {/* Check custom active sensors */}
+                {customSensors.map((sensor) => {
+                  const isActive = activeSensors[sensor.id] !== false;
+                  if (!isActive) return null;
+                  return (
+                    <div key={sensor.id} className="relative flex flex-col items-center justify-center p-4 bg-light rounded-xl border border-gray-150 hover:bg-gray-200 transition-all text-center h-[105px] shadow-sm">
+                      <span className="absolute top-2 left-2 text-[8px] font-extrabold bg-info/15 text-info px-1.5 py-0.5 rounded uppercase tracking-wide">Custom</span>
+                      <i className="mdi mdi-cube text-3xl text-secondary mb-2 animate-pulse"></i>
+                      <span className="text-[11px] font-bold text-gray-700 leading-tight">{sensor.name}</span>
+                    </div>
+                  );
+                })}
+
+                {/* If none */}
+                {Object.keys(activeSensors).filter(key => activeSensors[key] !== false).length === 0 && customSensors.filter(s => activeSensors[s.id] !== false).length === 0 && (
+                  <p className="text-xs text-gray-400 font-medium py-2 col-span-full text-center">No sensors are currently active.</p>
+                )}
+              </div>
+            </div>
+
+            {/* Active Equipment */}
+            <div className="bg-white rounded-2xl p-6 shadow-[0_4px_20px_rgba(0,0,0,0.03)] border border-gray-100">
+              <h3 className="text-lg font-bold text-primary mb-4 flex items-center gap-2">
+                <span className="w-1.5 h-4 bg-primary rounded-full"></span>
+                Active Actuators Grid
+              </h3>
+              
+              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
+                {/* Check default equipment */}
+                {Object.entries({
+                  circulationFan: { label: 'Circulation Fan', icon: 'mdi-fan' },
+                  growLight: { label: 'Grow Light', icon: 'mdi-lightbulb-on' },
+                  hvac: { label: 'HVAC', icon: 'mdi-air-conditioner' },
+                  humidifier: { label: 'Humidifier', icon: 'mdi-air-humidifier' },
+                  co2Generator: { label: 'CO2 Generator', icon: 'mdi-gas-cylinder' },
+                  waterPump: { label: 'Water Pump', icon: 'mdi-water-pump' },
+                  solenoidValve: { label: 'Solenoid Valve', icon: 'mdi-pipe-valve' },
+                  dosingPump: { label: 'Dosing Pump', icon: 'mdi-eyedropper' },
+                  airPump: { label: 'Air Pump', icon: 'mdi-weather-windy' }
+                }).map(([key, meta]) => {
+                  const isActive = activeEquipment[key] !== false;
+                  if (!isActive) return null;
+                  const isRunning = equipment[key as keyof typeof equipment] === true;
+                  return (
+                    <div key={key} className="relative flex flex-col items-center justify-center p-4 bg-light rounded-xl border border-gray-150 hover:bg-gray-200 transition-all text-center h-[105px] shadow-sm">
+                      <div className="absolute top-2 right-2 flex items-center gap-1">
+                        <span className={`w-1.5 h-1.5 rounded-full ${isRunning ? 'bg-success animate-pulse' : 'bg-gray-400'}`}></span>
+                        <span className={`text-[8px] font-bold uppercase tracking-wider ${isRunning ? 'text-success' : 'text-gray-400'}`}>
+                          {isRunning ? 'Run' : 'Off'}
+                        </span>
+                      </div>
+                      <i className={`mdi ${meta.icon} text-3xl text-secondary mb-2 ${isRunning ? 'animate-spin' : ''}`} style={{ animationDuration: '4s' }}></i>
+                      <span className="text-[11px] font-bold text-gray-700 leading-tight">{meta.label}</span>
+                    </div>
+                  );
+                })}
+
+                {/* Check custom equipment */}
+                {customEquipments.map((eq) => {
+                  const isActive = activeEquipment[eq.id] !== false;
+                  if (!isActive) return null;
+                  const isRunning = customEquipmentStates[eq.id] === true;
+                  return (
+                    <div key={eq.id} className="relative flex flex-col items-center justify-center p-4 bg-light rounded-xl border border-gray-150 hover:bg-gray-200 transition-all text-center h-[105px] shadow-sm">
+                      <span className="absolute top-2 left-2 text-[8px] font-extrabold bg-info/15 text-info px-1.5 py-0.5 rounded uppercase tracking-wide">Custom</span>
+                      <div className="absolute top-2 right-2 flex items-center gap-1">
+                        <span className={`w-1.5 h-1.5 rounded-full ${isRunning ? 'bg-success animate-pulse' : 'bg-gray-400'}`}></span>
+                      </div>
+                      <i className={`mdi mdi-expansion-port text-3xl text-secondary mb-2 ${isRunning ? 'animate-bounce' : ''}`}></i>
+                      <span className="text-[11px] font-bold text-gray-700 leading-tight">{eq.name}</span>
+                    </div>
+                  );
+                })}
+
+                {/* If none */}
+                {Object.keys(activeEquipment).filter(key => activeEquipment[key] !== false).length === 0 && customEquipments.filter(e => activeEquipment[e.id] !== false).length === 0 && (
+                  <p className="text-xs text-gray-400 font-medium py-2 col-span-full text-center">No equipment is currently active.</p>
+                )}
+              </div>
+            </div>
           </div>
+        </div>
+      )}
+
+      {currentTab === 'dashboard' && (
+        <div>
+          {/* Header */}
+          <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6">
+            <h2 className="text-2xl font-semibold text-primary">Dashboard Overview</h2>
+          </div>
+
+          {/* Search Controls Card */}
+          <div className="bg-white rounded-xl p-5 mb-6 shadow-sm border border-gray-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => {
+                  setDashboardMode('realtime');
+                }}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                  dashboardMode === 'realtime'
+                    ? 'bg-secondary text-white shadow-sm'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                Real-time (Last 24h)
+              </button>
+              <button
+                onClick={() => {
+                  setDashboardMode('custom');
+                }}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                  dashboardMode === 'custom'
+                    ? 'bg-secondary text-white shadow-sm'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                Custom Range
+              </button>
+            </div>
+
+            {dashboardMode === 'custom' && (
+              <div className="flex flex-wrap items-center gap-2 animate-[fadeIn_0.2s_ease-in-out]">
+                <div className="flex items-center gap-1.5 font-medium text-gray-700 text-sm">
+                  <span>Start Date:</span>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="p-2 border border-gray-300 rounded-lg text-sm focus:border-secondary outline-none bg-white font-normal"
+                  />
+                </div>
+                <div className="flex items-center gap-1.5 font-medium text-gray-700 text-sm">
+                  <span>End Date:</span>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="p-2 border border-gray-300 rounded-lg text-sm focus:border-secondary outline-none bg-white font-normal"
+                  />
+                </div>
+                <button
+                  onClick={() => fetchDashboardData('custom', startDate, endDate)}
+                  className="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-sm"
+                  disabled={isChartLoading}
+                >
+                  {isChartLoading ? 'Searching...' : 'Search'}
+                </button>
+              </div>
+            )}
+            
+            {dashboardMode === 'realtime' && (
+              <div className="flex items-center gap-2 text-xs font-semibold text-secondary animate-pulse">
+                <span className="w-2.5 h-2.5 rounded-full bg-secondary inline-block"></span>
+                <span>Subscribed to Live Telemetry Updates</span>
+              </div>
+            )}
+          </div>
+
+          {/* Loading Indicator or Chart Data */}
+          {isChartLoading ? (
+            <div className="py-20 text-center">
+              <div className="animate-spin inline-block w-8 h-8 border-4 border-secondary border-t-transparent rounded-full mb-3" />
+              <p className="text-gray-500 text-sm font-medium">Fetching sensor history from database...</p>
+            </div>
+          ) : (
+            <div className="space-y-8">
+              {/* Active Sensors Section */}
+              <div>
+                <h3 className="text-lg font-semibold text-primary mb-4 flex items-center gap-2">
+                  <span className="w-2 h-5 bg-secondary rounded-full inline-block"></span>
+                  Active Sensors
+                </h3>
+                {Object.keys(SENSOR_METADATA).filter(key => activeSensors[key as keyof typeof activeSensors] !== false).length === 0 ? (
+                  <div className="bg-white p-8 text-center text-gray-400 rounded-xl border border-gray-200">
+                    No active sensors configured in system settings.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                    {Object.entries(SENSOR_METADATA)
+                      .filter(([key]) => activeSensors[key as keyof typeof activeSensors] !== false)
+                      .map(([key, meta]) => {
+                        const dataPoints = chartData[key] || [];
+                        const latestVal = dataPoints.length > 0 ? dataPoints[dataPoints.length - 1].value : null;
+
+                        return (
+                          <div key={key} className="bg-white rounded-xl p-5 shadow-sm border border-gray-150 transition-all hover:shadow-md">
+                            <div className="flex justify-between items-center mb-4">
+                              <div>
+                                <h4 className="font-bold text-gray-800 text-lg">{meta.label}</h4>
+                                <p className="text-xs text-gray-400">Total data points: {dataPoints.length}</p>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-2xl font-black text-primary">
+                                  {latestVal !== null ? `${latestVal.toFixed(1)}` : '--'}
+                                </span>
+                                <span className="text-xs font-semibold text-gray-500 ml-1">{meta.unit}</span>
+                              </div>
+                            </div>
+                            
+                            <div className="h-[250px] w-full mt-2">
+                              {dataPoints.length === 0 ? (
+                                <div className="h-full flex items-center justify-center bg-gray-50 rounded-lg border border-dashed text-sm text-gray-400">
+                                  No data recorded in the selected period.
+                                </div>
+                              ) : (
+                                <ResponsiveContainer width="100%" height="100%">
+                                  <LineChart data={dataPoints} margin={{ top: 10, right: 10, left: -20, bottom: 50 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f3f4" />
+                                    <XAxis dataKey="time" tick={createXAxisTick(dataPoints)} />
+                                    <YAxis tick={{ fontSize: 10, fill: '#888' }} domain={['auto', 'auto']} />
+                                    <Tooltip 
+                                      contentStyle={{ backgroundColor: '#2c3e50', borderRadius: '8px', border: 'none', color: '#fff', fontSize: '12px' }}
+                                      labelStyle={{ fontWeight: 'bold', marginBottom: '4px' }}
+                                      labelFormatter={(label) => {
+                                        if (!label) return '';
+                                        const [timeStr, dateStr] = label.split('|');
+                                        return dateStr ? `${dateStr} ${timeStr}` : timeStr;
+                                      }}
+                                    />
+                                    <Line type="monotone" dataKey="value" stroke={meta.color} strokeWidth={2.5} dot={dataPoints.length < 50} activeDot={{ r: 6 }} />
+                                  </LineChart>
+                                </ResponsiveContainer>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+
+              {/* Disabled Sensors Section */}
+              <div className="pt-4">
+                <h3 className="text-lg font-semibold text-gray-500 mb-4 flex items-center gap-2">
+                  <span className="w-2 h-5 bg-gray-300 rounded-full inline-block"></span>
+                  Disabled Sensors
+                </h3>
+                {Object.keys(SENSOR_METADATA).filter(key => activeSensors[key as keyof typeof activeSensors] === false).length === 0 ? (
+                  <div className="bg-white p-6 text-center text-gray-400 rounded-xl border border-gray-200 text-sm">
+                    No disabled sensors.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 opacity-60">
+                    {Object.entries(SENSOR_METADATA)
+                      .filter(([key]) => activeSensors[key as keyof typeof activeSensors] === false)
+                      .map(([key, meta]) => {
+                        return (
+                          <div key={key} className="bg-white rounded-xl p-5 shadow-sm border border-gray-200 bg-gray-50/50">
+                            <div className="flex justify-between items-center mb-4">
+                              <div>
+                                <h4 className="font-bold text-gray-500 text-lg">{meta.label} <span className="text-xs font-normal text-danger border border-danger/30 rounded px-1.5 py-0.5 ml-1 bg-danger/5">Disabled</span></h4>
+                                <p className="text-xs text-gray-400">Sensor monitoring is currently disabled in system settings.</p>
+                              </div>
+                            </div>
+                            
+                            <div className="h-[200px] w-full mt-2">
+                              {/* Draw an empty chart framework to display basic chart structure */}
+                              <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={[]} margin={{ top: 10, right: 10, left: -20, bottom: 50 }}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
+                                  <XAxis dataKey="time" tick={createXAxisTick([])} />
+                                  <YAxis tick={{ fontSize: 9, fill: '#aaa' }} domain={[0, 100]} />
+                                </LineChart>
+                              </ResponsiveContainer>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1301,6 +2237,46 @@ while True:
               </div>
             </div>
           </div>
+
+          {/* Custom Sensors Section */}
+          {customSensors.length > 0 && (
+            <div className="bg-white rounded-xl p-6 shadow-[0_4px_12px_rgba(0,0,0,0.05)] border-l-4 border-info mt-6 transition-all hover:shadow-md animate-[fadeIn_0.3s_ease-in-out]">
+              <h3 className="text-lg font-semibold text-primary mb-4">Custom Sensors</h3>
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
+                {customSensors.map((sensor) => {
+                  const isActive = activeSensors[sensor.id] !== false;
+                  const config = sensorConfigs[sensor.name] || {
+                    lowerThreshold: sensor.lowerLimit,
+                    upperThreshold: sensor.upperLimit,
+                    samplingRateValue: sensor.samplingRateValue,
+                    samplingRateUnit: sensor.samplingRateUnit
+                  };
+                  const unitMap: Record<string, string> = { second: 'sec', minute: 'min', hour: 'hr' };
+                  const rateStr = `${config.samplingRateValue} ${unitMap[config.samplingRateUnit] || 'sec'}`;
+                  return (
+                    <div key={sensor.id} className={`bg-light p-5 rounded-lg text-center transition-colors ${isActive ? 'hover:bg-gray-200' : 'opacity-40 grayscale pointer-events-none'}`}>
+                      <div className="text-secondary mb-2"><i className="mdi mdi-cube text-4xl"></i></div>
+                      <div className="text-sm font-semibold text-gray-700">{sensor.name}</div>
+                      <div className="text-[11px] text-gray-500 mt-0.5">
+                        Limit: {config.lowerThreshold} ~ {config.upperThreshold} ({rateStr})
+                      </div>
+                      <div className="text-2xl font-bold my-3 text-primary">-</div>
+                      <span className={`px-3 py-1 rounded-full text-xs font-medium text-white ${isActive ? 'bg-success' : 'bg-gray-400'}`}>
+                        {isActive ? 'Normal' : 'Disabled'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Add Sensor Button */}
+          <div className="flex justify-end mt-4 mb-8">
+            <button onClick={() => setIsAddSensorModalOpen(true)} className="flex items-center gap-2 bg-light hover:bg-gray-200 text-gray-800 px-6 py-3 rounded-full font-medium transition-all shadow-sm border border-gray-300">
+              <span className="text-xl">+</span> Add Sensor
+            </button>
+          </div>
         </div>
       )}
 
@@ -1428,8 +2404,14 @@ while True:
               <div className="flex flex-col gap-3">
                 {Object.entries({ temperature: 'Temperature', humidity: 'Humidity', light: 'Light Intensity', co2: 'Carbon Dioxide', ph: 'Hydrogen Ion Concentration', ec: 'Electrical Conductivity', do: 'Dissolved Oxygen' }).map(([key, label]) => (
                   <label key={key} className="flex items-center gap-3 cursor-pointer p-2 hover:bg-light rounded-lg transition-colors">
-                    <input type="checkbox" checked={activeSensors[key as keyof typeof activeSensors]} onChange={() => toggleSensor(key as keyof typeof activeSensors)} className="w-5 h-5 accent-secondary cursor-pointer" />
+                    <input type="checkbox" checked={activeSensors[key]} onChange={() => toggleSensor(key)} className="w-5 h-5 accent-secondary cursor-pointer" />
                     <span className="text-gray-700 font-medium">{label}</span>
+                  </label>
+                ))}
+                {customSensors.map((sensor) => (
+                  <label key={sensor.id} className="flex items-center gap-3 cursor-pointer p-2 hover:bg-light rounded-lg transition-colors">
+                    <input type="checkbox" checked={activeSensors[sensor.id] !== false} onChange={() => toggleSensor(sensor.id)} className="w-5 h-5 accent-secondary cursor-pointer" />
+                    <span className="text-gray-700 font-medium">{sensor.name} <span className="text-[10px] text-info border border-info px-1.5 py-0.5 rounded-full ml-1 font-bold">Custom</span></span>
                   </label>
                 ))}
               </div>
@@ -1865,6 +2847,67 @@ while True:
                 </button>
               </div>
             </div>
+            </div>
+
+          {/* 가상 환경(venv) 배포 가이드 패널 */}
+          <div className="bg-white rounded-xl p-8 shadow-[0_4px_12px_rgba(0,0,0,0.05)] border-t-4 border-info mt-6 text-left">
+            <h3 className="text-lg font-semibold text-primary mb-4 flex items-center gap-2">
+              <Info size={24} className="text-info" /> Raspberry Pi <code>agent.py</code> 가상 환경(venv) 실행 가이드
+            </h3>
+            <p className="text-gray-600 text-sm mb-6">
+              라즈베리파이의 격리된 Python 가상 환경(venv)에서 에이전트와 데이터 로거를 안전하고 지속적으로 실행하는 방법입니다.
+            </p>
+            
+            <div className="space-y-5 text-sm text-gray-700">
+              <div>
+                <h4 className="font-bold text-primary mb-1">1. 필수 시스템 패키지 설치</h4>
+                <p className="text-gray-500 mb-2">가상 환경 생성을 위해 python3-venv와 최신 pip 패키지를 설치합니다.</p>
+                <pre className="bg-light p-3.5 rounded-lg border border-gray-200 text-xs overflow-x-auto font-mono text-gray-800">
+                  sudo apt update && sudo apt install -y python3-venv python3-pip
+                </pre>
+              </div>
+
+              <div>
+                <h4 className="font-bold text-primary mb-1">2. 프로젝트 폴더 구성 및 코드 복사</h4>
+                <p className="text-gray-500 mb-2">라즈베리파이에 폴더를 생성하고 발급받은 <code>data-logger.py</code>, <code>agent.py</code>, <code>.env</code> 파일을 업로드합니다.</p>
+                <pre className="bg-light p-3.5 rounded-lg border border-gray-200 text-xs overflow-x-auto font-mono text-gray-800">
+                  mkdir -p ~/smartfarm-logger{"\n"}
+                  cd ~/smartfarm-logger
+                </pre>
+              </div>
+
+              <div>
+                <h4 className="font-bold text-primary mb-1">3. 가상 환경 생성 및 활성화</h4>
+                <p className="text-gray-500 mb-2">독립된 Python 런타임을 구성하기 위해 venv를 생성하고 시스템 쉘에 활성화합니다.</p>
+                <pre className="bg-light p-3.5 rounded-lg border border-gray-200 text-xs overflow-x-auto font-mono text-gray-800">
+                  python3 -m venv venv{"\n"}
+                  source venv/bin/activate
+                </pre>
+                <p className="text-xs text-info mt-1 font-medium">* 활성화되면 프롬프트 좌측에 (venv) 표시가 나타납니다.</p>
+              </div>
+
+              <div>
+                <h4 className="font-bold text-primary mb-1">4. 의존성 라이브러리 설치</h4>
+                <p className="text-gray-500 mb-2">가상 환경이 활성화된 상태에서 로거 및 에이전트 구동에 필요한 패키지들을 설치합니다.</p>
+                <pre className="bg-light p-3.5 rounded-lg border border-gray-200 text-xs overflow-x-auto font-mono text-gray-800">
+                  pip install --upgrade pip{"\n"}
+                  pip install paho-mqtt supabase websockets python-dotenv schedule
+                </pre>
+              </div>
+
+              <div>
+                <h4 className="font-bold text-primary mb-1">5. 백그라운드 백데몬(Daemon)으로 실행</h4>
+                <p className="text-gray-500 mb-2">터미널 세션이 종료되어도 백그라운드에서 상시 명령 대기 상태를 유지하도록 nohup 명령어를 통해 백라이트 실행합니다.</p>
+                <pre className="bg-light p-3.5 rounded-lg border border-gray-200 text-xs overflow-x-auto font-mono text-gray-800">
+                  nohup venv/bin/python agent.py &gt; agent.log 2&gt;&amp;1 &amp;
+                </pre>
+                <p className="text-gray-500 mt-2 mb-2">실행 로그 실시간 추적 및 중단 명령어:</p>
+                <pre className="bg-light p-3.5 rounded-lg border border-gray-200 text-xs overflow-x-auto font-mono text-gray-800">
+                  tail -f agent.log{"\n"}
+                  pkill -f agent.py
+                </pre>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1941,13 +2984,22 @@ while True:
             <div className="mb-4">
               <label className="block mb-2 font-medium text-primary">Select Sensor Type</label>
               <select className="w-full p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" value={configSensor} onChange={e => setConfigSensor(e.target.value)}>
-                <option value="Temperature">Temperature</option>
-                <option value="Light Intensity">Light Intensity</option>
-                <option value="Humidity">Humidity</option>
-                <option value="Hydrogen Ion Concentration">Hydrogen Ion Concentration</option>
-                <option value="Electrical Conductivity">Electrical Conductivity</option>
-                <option value="Dissolved Oxygen">Dissolved Oxygen</option>
-                <option value="Carbon Dioxide">Carbon Dioxide</option>
+                <optgroup label="Default Sensors">
+                  <option value="Temperature">Temperature</option>
+                  <option value="Light Intensity">Light Intensity</option>
+                  <option value="Humidity">Humidity</option>
+                  <option value="Hydrogen Ion Concentration">Hydrogen Ion Concentration</option>
+                  <option value="Electrical Conductivity">Electrical Conductivity</option>
+                  <option value="Dissolved Oxygen">Dissolved Oxygen</option>
+                  <option value="Carbon Dioxide">Carbon Dioxide</option>
+                </optgroup>
+                {customSensors.length > 0 && (
+                  <optgroup label="Custom Sensors">
+                    {customSensors.map(sensor => (
+                      <option key={sensor.id} value={sensor.name}>{sensor.name}</option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </div>
             
@@ -2170,6 +3222,50 @@ while True:
         </div>
       )}
 
+      {/* Add Sensor Modal */}
+      {isAddSensorModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex justify-center items-center z-[1000] animate-in fade-in duration-200">
+          <div className="bg-white p-8 rounded-xl w-[90%] max-w-[600px] shadow-2xl">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-2xl font-semibold text-primary">Add Custom Sensor</h3>
+              <button onClick={() => setIsAddSensorModalOpen(false)} className="text-gray-400 hover:text-gray-600 transition-colors"><X size={24} /></button>
+            </div>
+            
+            <div className="mb-4">
+              <label className="block mb-2 font-medium text-primary">Sensor Type / Name (센서 종류명)</label>
+              <input type="text" className="w-full p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" placeholder="e.g. Soil Moisture" value={newSensorName} onChange={e => setNewSensorName(e.target.value)} />
+            </div>
+
+            <div className="mb-4">
+              <label className="block mb-2 font-medium text-primary">Sampling Rate (측정 주기)</label>
+              <div className="flex gap-2">
+                <input type="number" className="flex-1 p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" placeholder="e.g. 10" value={newSensorRateValue} onChange={e => setNewSensorRateValue(e.target.value)} />
+                <select className="p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors w-[150px]" value={newSensorRateUnit} onChange={e => setNewSensorRateUnit(e.target.value)}>
+                  <option value="second">Seconds (초)</option>
+                  <option value="minute">Minutes (분)</option>
+                  <option value="hour">Hours (시간)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div>
+                <label className="block mb-2 font-medium text-primary">Lower Limit (임계 최소값)</label>
+                <input type="number" className="w-full p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" placeholder="e.g. 30" value={newSensorLower} onChange={e => setNewSensorLower(e.target.value)} />
+              </div>
+              <div>
+                <label className="block mb-2 font-medium text-primary">Upper Limit (임계 최대값)</label>
+                <input type="number" className="w-full p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" placeholder="e.g. 80" value={newSensorUpper} onChange={e => setNewSensorUpper(e.target.value)} />
+              </div>
+            </div>
+
+            <button onClick={handleSaveCustomSensor} className="w-full bg-primary text-white p-3 rounded-lg flex justify-center items-center gap-2 hover:bg-primary/90 transition-colors font-medium">
+              <CheckCircle size={20} /> Save Sensor
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Equipment Configuration Modal */}
       {isEquipConfigModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex justify-center items-center z-[1000] animate-in fade-in duration-200">
@@ -2197,37 +3293,53 @@ while True:
               </select>
             </div>
             
-            <div className="mb-6">
-              <label className="block mb-2 font-medium text-primary">Start Time (운전 시작)</label>
-              <div className="flex gap-2 items-center">
-                <select className="p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" value={equipStartAmPm} onChange={e => setEquipStartAmPm(e.target.value)}>
-                  <option value="AM">AM (오전)</option>
-                  <option value="PM">PM (오후)</option>
-                </select>
-                <select className="p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors flex-1" value={equipStartHour} onChange={e => setEquipStartHour(e.target.value)}>
-                  {Array.from({length: 12}, (_, i) => String(i + 1).padStart(2, '0')).map(h => <option key={h} value={h}>{h}</option>)}
-                </select>
-                <span className="font-bold">:</span>
-                <select className="p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors flex-1" value={equipStartMinute} onChange={e => setEquipStartMinute(e.target.value)}>
-                  {Array.from({length: 60}, (_, i) => String(i).padStart(2, '0')).map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
+            {/* 24-Hour Continuous Operation Toggle */}
+            <div className="flex justify-between items-center p-3.5 bg-light rounded-xl mb-6 hover:bg-gray-200 transition-colors">
+              <div className="flex flex-col text-left">
+                <span className="text-sm font-semibold text-primary">24-Hour Continuous Operation</span>
+                <span className="text-[10px] text-gray-400 font-medium">Ignore start/stop schedule and run continuously</span>
               </div>
+              <label className="relative inline-block w-[50px] h-[24px]">
+                <input type="checkbox" className="opacity-0 w-0 h-0 peer" checked={equipIsContinuous} onChange={(e) => setEquipIsContinuous(e.target.checked)} />
+                <span className="absolute cursor-pointer top-0 left-0 right-0 bottom-0 transition-[0.4s] rounded-[24px] bg-[#ccc] peer-checked:bg-success
+                  before:absolute before:content-[''] before:h-[16px] before:w-[16px] before:left-[4px] before:bottom-[4px] before:bg-white before:transition-[0.4s] before:rounded-full peer-checked:before:translate-x-[26px]">
+                </span>
+              </label>
             </div>
+            
+            <div className={`transition-all duration-300 ${equipIsContinuous ? 'opacity-40 pointer-events-none' : ''}`}>
+              <div className="mb-6">
+                <label className="block mb-2 font-medium text-primary">Start Time (운전 시작)</label>
+                <div className="flex gap-2 items-center">
+                  <select className="p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" value={equipStartAmPm} disabled={equipIsContinuous} onChange={e => setEquipStartAmPm(e.target.value)}>
+                    <option value="AM">AM (오전)</option>
+                    <option value="PM">PM (오후)</option>
+                  </select>
+                  <select className="p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors flex-1" value={equipStartHour} disabled={equipIsContinuous} onChange={e => setEquipStartHour(e.target.value)}>
+                    {Array.from({length: 12}, (_, i) => String(i + 1).padStart(2, '0')).map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                  <span className="font-bold">:</span>
+                  <select className="p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors flex-1" value={equipStartMinute} disabled={equipIsContinuous} onChange={e => setEquipStartMinute(e.target.value)}>
+                    {Array.from({length: 60}, (_, i) => String(i).padStart(2, '0')).map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
+              </div>
 
-            <div className="mb-8">
-              <label className="block mb-2 font-medium text-primary">Stop Time (운전 정지)</label>
-              <div className="flex gap-2 items-center">
-                <select className="p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" value={equipStopAmPm} onChange={e => setEquipStopAmPm(e.target.value)}>
-                  <option value="AM">AM (오전)</option>
-                  <option value="PM">PM (오후)</option>
-                </select>
-                <select className="p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors flex-1" value={equipStopHour} onChange={e => setEquipStopHour(e.target.value)}>
-                  {Array.from({length: 12}, (_, i) => String(i + 1).padStart(2, '0')).map(h => <option key={h} value={h}>{h}</option>)}
-                </select>
-                <span className="font-bold">:</span>
-                <select className="p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors flex-1" value={equipStopMinute} onChange={e => setEquipStopMinute(e.target.value)}>
-                  {Array.from({length: 60}, (_, i) => String(i).padStart(2, '0')).map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
+              <div className="mb-8">
+                <label className="block mb-2 font-medium text-primary">Stop Time (운전 정지)</label>
+                <div className="flex gap-2 items-center">
+                  <select className="p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" value={equipStopAmPm} disabled={equipIsContinuous} onChange={e => setEquipStopAmPm(e.target.value)}>
+                    <option value="AM">AM (오전)</option>
+                    <option value="PM">PM (오후)</option>
+                  </select>
+                  <select className="p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors flex-1" value={equipStopHour} disabled={equipIsContinuous} onChange={e => setEquipStopHour(e.target.value)}>
+                    {Array.from({length: 12}, (_, i) => String(i + 1).padStart(2, '0')).map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                  <span className="font-bold">:</span>
+                  <select className="p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors flex-1" value={equipStopMinute} disabled={equipIsContinuous} onChange={e => setEquipStopMinute(e.target.value)}>
+                    {Array.from({length: 60}, (_, i) => String(i).padStart(2, '0')).map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
               </div>
             </div>
 

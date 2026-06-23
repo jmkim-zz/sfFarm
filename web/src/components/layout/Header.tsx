@@ -9,10 +9,7 @@ export default function Header() {
         <h1 className="text-xl font-semibold">Smart Farm Control Center</h1>
       </div>
       <div className="flex items-center gap-5">
-        <div className="flex items-center gap-2.5 bg-light px-4 py-2 rounded-full">
-          <div className="w-3 h-3 rounded-full bg-success animate-pulse"></div>
-          <span className="text-sm font-medium">System Online</span>
-        </div>
+        {/* Connection status moved to Home screen */}
       </div>
     </header>
   );
