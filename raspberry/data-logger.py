@@ -47,6 +47,12 @@ USE_SIMULATOR = str(os.getenv("USE_SIMULATOR", "false")).lower() == "true"
 SIMULATOR_INTERVAL = int(os.getenv("SIMULATOR_INTERVAL", "10000")) / 1000.0
 SIMULATOR_DEVICE_ID = os.getenv("SIMULATOR_DEVICE_ID", "sim-uno-r4")
 
+# Buffer for averaging per topic
+data_buffer = {} # topic -> list of payloads
+last_sync_time = {} # topic -> float
+buffer_lock = threading.Lock()
+TOPIC_SYNC_INTERVALS = {} # Injected by Web UI
+
 # Global variables for dynamic subscription management
 subscribed_topics = set()
 topic_to_device = {}
@@ -146,18 +152,106 @@ def on_message(client, userdata, msg):
             parts = topic.split('/')
             device_id = parts[1] if len(parts) >= 2 else "unknown"
 
-        # Insert payload directly into JSONB field
-        record = {
-            "device_id": device_id,
-            "payload": data
-        }
-        response = supabase.table("dynamic_telemetry").insert(record).execute()
-        print(f"[DB Inserted] Device: {device_id} -> dynamic_telemetry insertion successful")
+        # Buffer payload for averaging instead of direct insertion
+        with buffer_lock:
+            if topic not in data_buffer:
+                data_buffer[topic] = []
+            data_buffer[topic].append(data)
 
     except Exception as e:
         print(f"[Error] Failed to process message or insert into DB: {e}")
 
-# 4. Simulator Loop (Runs as a background thread)
+# 4. Background DB Sync Loop (Averaging logic per topic)
+def db_sync_loop():
+    print(f"[{'='*40}]")
+    print(f"[DB Sync] Starting per-topic DB transmission loop (Tick: 60s)")
+    print(f"[{'='*40}]")
+    while True:
+        time.sleep(60) # Wake up every 1 minute
+        current_time = time.time()
+        
+        with buffer_lock:
+            for topic, payloads in list(data_buffer.items()):
+                # Get interval for this specific topic (default 5 mins)
+                interval_mins = TOPIC_SYNC_INTERVALS.get(topic, 5)
+                last_time = last_sync_time.get(topic, 0)
+                
+                # Check if the interval has elapsed
+                if (current_time - last_time) >= (interval_mins * 60):
+                    if not payloads:
+                        last_sync_time[topic] = current_time
+                        continue
+                    
+                    avg_payload = {}
+                    
+                    # 1. Group numeric values by key
+                    val_lists = {}
+                    for p in payloads:
+                        for k, v in p.items():
+                            try:
+                                # Attempt to convert to float for averaging
+                                val = float(v)
+                                if k not in val_lists:
+                                    val_lists[k] = []
+                                val_lists[k].append(val)
+                            except (ValueError, TypeError):
+                                # If not a number, keep the latest string/boolean value
+                                avg_payload[k] = v
+                    
+                    # 2. Calculate average with IQR Outlier Rejection
+                    for k, values in val_lists.items():
+                        if not values:
+                            continue
+                        
+                        if len(values) < 4:
+                            # Not enough data for IQR, use simple average
+                            avg = sum(values) / len(values)
+                        else:
+                            sorted_vals = sorted(values)
+                            # Calculate Q1 and Q3
+                            q1_idx = int(len(sorted_vals) * 0.25)
+                            q3_idx = int(len(sorted_vals) * 0.75)
+                            q1 = sorted_vals[q1_idx]
+                            q3 = sorted_vals[q3_idx]
+                            iqr = q3 - q1
+                            
+                            lower_bound = q1 - (1.5 * iqr)
+                            upper_bound = q3 + (1.5 * iqr)
+                            
+                            # Filter out outliers
+                            filtered_vals = [v for v in values if lower_bound <= v <= upper_bound]
+                            
+                            # Fallback if all values are filtered (rare edge case)
+                            if not filtered_vals:
+                                filtered_vals = values
+                                
+                            avg = sum(filtered_vals) / len(filtered_vals)
+                            
+                        # Round to 2 decimal places
+                        avg_payload[k] = round(avg, 2)
+                    
+                    # Identify device_id by topic
+                    with state_lock:
+                        device_id = topic_to_device.get(topic)
+                    if not device_id:
+                        parts = topic.split('/')
+                        device_id = parts[1] if len(parts) >= 2 else "unknown"
+
+                    record = {
+                        "device_id": device_id,
+                        "payload": avg_payload
+                    }
+                    try:
+                        supabase.table("dynamic_telemetry").insert(record).execute()
+                        print(f"[DB Sync] Topic: {topic} (Device: {device_id}) -> Averaged payload inserted: {avg_payload}")
+                        
+                        # Clear buffer and update time ONLY for this topic
+                        data_buffer[topic] = []
+                        last_sync_time[topic] = current_time
+                    except Exception as e:
+                        print(f"[Error] Failed to insert averaged data for {topic}: {e}")
+
+# 5. Simulator Loop (Runs as a background thread)
 def simulator_loop(client):
     print(f"[{'='*40}]")
     print(f"[Simulator] Simulator mode enabled.")
@@ -203,6 +297,10 @@ if __name__ == "__main__":
     # Start background polling thread for DB configuration updates
     polling_thread = threading.Thread(target=config_polling_loop, args=(client,), daemon=True)
     polling_thread.start()
+
+    # Start background thread for syncing averaged DB data
+    db_sync_thread = threading.Thread(target=db_sync_loop, daemon=True)
+    db_sync_thread.start()
 
     if USE_SIMULATOR:
         sim_thread = threading.Thread(target=simulator_loop, args=(client,), daemon=True)

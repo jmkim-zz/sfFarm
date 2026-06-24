@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { LayoutGrid, Play, Square, FolderOpen, SlidersHorizontal, CheckCircle, AlertTriangle, XCircle, Info, X, Cpu, Settings2, Users, CircuitBoard, Wifi, Copy, Download, Code, Server, Terminal, Database, Key, Cloud, FileCode2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase/client';
@@ -295,12 +295,49 @@ function useEquipmentControl(showNotification: (msg: string, type: NotificationT
     airPump: 'Air Pump'
   };
 
+  // 컴포넌트 마운트 시 기기 온/오프 상태 로드
+  useEffect(() => {
+    const loadEquipmentStates = async () => {
+      try {
+        const { data: equipStatus } = await supabase.from('app_settings').select('value').eq('key', 'sf_equipment_status').single();
+        const { data: customEquipStatus } = await supabase.from('app_settings').select('value').eq('key', 'sf_custom_equipment_status').single();
+
+        if (equipStatus?.value) {
+          setEquipment(equipStatus.value);
+        } else {
+          const saved = localStorage.getItem('sf_equipment_status');
+          if (saved) setEquipment(JSON.parse(saved));
+        }
+
+        if (customEquipStatus?.value) {
+          setCustomEquipmentStates(customEquipStatus.value);
+        } else {
+          const savedCustom = localStorage.getItem('sf_custom_equipment_status');
+          if (savedCustom) setCustomEquipmentStates(JSON.parse(savedCustom));
+        }
+      } catch (err) {
+        console.error('Failed to load equipment status:', err);
+      }
+    };
+    loadEquipmentStates();
+  }, []);
+
   const toggleEquipment = (key: string, state: boolean, isCustom: boolean = false, customName: string = '') => {
     if (isCustom) {
-      setCustomEquipmentStates(prev => ({ ...prev, [key]: state }));
+      setCustomEquipmentStates(prev => {
+        const next = { ...prev, [key]: state };
+        localStorage.setItem('sf_custom_equipment_status', JSON.stringify(next));
+        supabase.from('app_settings').upsert({ key: 'sf_custom_equipment_status', value: next }).then();
+        return next;
+      });
       showNotification(`${customName} ${state ? 'activated' : 'deactivated'}`, 'success');
     } else {
-      setEquipment(prev => ({ ...prev, [key as keyof typeof equipment]: state }));
+      setEquipment(prev => {
+        const next = { ...prev, [key as keyof typeof equipment]: state };
+        localStorage.setItem('sf_equipment_status', JSON.stringify(next));
+        supabase.from('app_settings').upsert({ key: 'sf_equipment_status', value: next }).then();
+        return next;
+      });
       showNotification(`${equipmentNames[key as keyof typeof equipment]} ${state ? 'activated' : 'deactivated'}`, 'success');
     }
   };
@@ -308,16 +345,28 @@ function useEquipmentControl(showNotification: (msg: string, type: NotificationT
   const startAll = () => {
     const allOn = Object.keys(equipment).reduce((acc, key) => ({ ...acc, [key]: true }), {} as typeof equipment);
     setEquipment(allOn);
+    localStorage.setItem('sf_equipment_status', JSON.stringify(allOn));
+    supabase.from('app_settings').upsert({ key: 'sf_equipment_status', value: allOn }).then();
+
     const allCustomOn = Object.keys(customEquipmentStates).reduce((acc, key) => ({ ...acc, [key]: true }), {});
     setCustomEquipmentStates(allCustomOn);
+    localStorage.setItem('sf_custom_equipment_status', JSON.stringify(allCustomOn));
+    supabase.from('app_settings').upsert({ key: 'sf_custom_equipment_status', value: allCustomOn }).then();
+
     showNotification('Starting all equipment...', 'success');
   };
 
   const stopAll = () => {
     const allOff = Object.keys(equipment).reduce((acc, key) => ({ ...acc, [key]: false }), {} as typeof equipment);
     setEquipment(allOff);
+    localStorage.setItem('sf_equipment_status', JSON.stringify(allOff));
+    supabase.from('app_settings').upsert({ key: 'sf_equipment_status', value: allOff }).then();
+
     const allCustomOff = Object.keys(customEquipmentStates).reduce((acc, key) => ({ ...acc, [key]: false }), {});
     setCustomEquipmentStates(allCustomOff);
+    localStorage.setItem('sf_custom_equipment_status', JSON.stringify(allCustomOff));
+    supabase.from('app_settings').upsert({ key: 'sf_custom_equipment_status', value: allCustomOff }).then();
+
     showNotification('Stopping all equipment...', 'warning');
   };
 
@@ -744,6 +793,9 @@ export default function DashboardClient() {
     setSysWifiPass(localStorage.getItem('sf_sys_wifi_pass') || '');
   }, []);
 
+  // Python Edge Logger Setup
+  const [dbSyncInterval, setDbSyncInterval] = useState<Record<string, number>>({});
+
   // 모달 상태 관리
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false);
@@ -1061,23 +1113,29 @@ export default function DashboardClient() {
           setConfigLower(parsed.lowerThreshold !== undefined ? parsed.lowerThreshold.toString() : '');
           setConfigUpper(parsed.upperThreshold !== undefined ? parsed.upperThreshold.toString() : '');
         } else {
-          setConfigRateValue('10');
-          setConfigRateUnit('second');
-          setConfigLower('');
-          setConfigUpper('');
+          const customSensor = customSensors.find(cs => cs.name === configSensor);
+          if (customSensor) {
+            setConfigRateValue(customSensor.samplingRateValue.toString());
+            setConfigRateUnit(customSensor.samplingRateUnit || 'second');
+            setConfigLower(customSensor.lowerLimit.toString());
+            setConfigUpper(customSensor.upperLimit.toString());
+          } else {
+            setConfigRateValue('10');
+            setConfigRateUnit('second');
+            setConfigLower('');
+            setConfigUpper('');
+          }
         }
       }
     };
     loadConfig();
-  }, [isConfigModalOpen, configSensor]);
+  }, [isConfigModalOpen, configSensor, customSensors]);
 
   // 센서 설정값을 화면에 바로 표시하기 위한 상태 관리
   const [sensorConfigs, setSensorConfigs] = useState<Record<string, { lowerThreshold: number, upperThreshold: number, samplingRate: string | number, samplingRateValue?: number, samplingRateUnit?: string }>>({});
 
   const loadAllSensorConfigs = async () => {
-    const savedCustom = localStorage.getItem('sf_custom_sensors');
-    const parsedCustom = savedCustom ? JSON.parse(savedCustom) : [];
-    const customNames = parsedCustom.map((s: any) => s.name);
+    const customNames = customSensors.map((s: any) => s.name);
 
     const sensorsList = [
       "Temperature",
@@ -1104,7 +1162,7 @@ export default function DashboardClient() {
         if (saved) {
           newConfigs[s] = JSON.parse(saved);
         } else {
-          const customSensor = parsedCustom.find((cs: any) => cs.name === s);
+          const customSensor = customSensors.find((cs: any) => cs.name === s);
           if (customSensor) {
             newConfigs[s] = {
               samplingRateValue: customSensor.samplingRateValue,
@@ -1198,6 +1256,21 @@ export default function DashboardClient() {
         if (savedMqttServer) setMqttServer(savedMqttServer);
         if (savedMqttUser) setMqttUsername(savedMqttUser);
         if (savedMqttPass) setMqttPassword(savedMqttPass);
+      }
+
+      // Edge Logger Settings 로드
+      const { data: edgeLoggerData } = await supabase.from('app_settings').select('value').eq('key', 'sf_edge_logger_config').single();
+      if (edgeLoggerData?.value?.syncInterval) {
+        setDbSyncInterval(edgeLoggerData.value.syncInterval);
+      } else {
+        const savedSyncInterval = localStorage.getItem('sf_edge_logger_sync_interval');
+        if (savedSyncInterval) {
+          try {
+            setDbSyncInterval(JSON.parse(savedSyncInterval));
+          } catch(e) {
+            setDbSyncInterval({});
+          }
+        }
       }
     };
     loadNetworkSettings();
@@ -1423,12 +1496,30 @@ export default function DashboardClient() {
     }
   };
 
+  const activeMqttTopics = useMemo(() => {
+    const topics = new Set<string>();
+    Object.values(pinMqttTopics).forEach(group => {
+      group.forEach(row => {
+        row.forEach(topic => {
+          if (topic && topic.trim() !== '' && topic.trim() !== 'none') {
+            topics.add(topic.trim());
+          }
+        });
+      });
+    });
+    return Array.from(topics);
+  }, [pinMqttTopics]);
+
   // Raspberry Pi (Python) 코드 자동 생성 함수
   const handleGeneratePythonCode = async () => {
+    // 설정값 저장 (app_settings 및 localStorage)
+    await supabase.from('app_settings').upsert({ key: 'sf_edge_logger_config', value: { syncInterval: dbSyncInterval } });
+    localStorage.setItem('sf_edge_logger_sync_interval', JSON.stringify(dbSyncInterval));
+
     setIsGeneratingCode(true); // 로딩 상태 공유
     showNotification('Loading Python logger script...', 'info');
     try {
-      const response = await fetch('/api/get-python-logger');
+      const response = await fetch(`/api/get-python-logger?intervalMap=${encodeURIComponent(JSON.stringify(dbSyncInterval))}`);
       if (!response.ok) {
         const errorText = await response.text();
         try {
@@ -1514,6 +1605,7 @@ while True:
 
   // 설정 리뷰 및 검증 로직
   const reviewConfig = () => {
+    if (!configRateValue || parseFloat(configRateValue) <= 0) return showNotification('Please enter a valid sampling rate.', 'warning');
     if (!configLower || !configUpper) return showNotification('Please enter both lower and upper thresholds.', 'warning');
     if (parseFloat(configLower) >= parseFloat(configUpper)) return showNotification('Lower threshold must be less than upper threshold.', 'error');
     setIsReviewing(true);
@@ -1632,7 +1724,7 @@ while True:
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
             {/* Weather Card - Glassmorphism style */}
-            <div className={`lg:col-span-2 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden transition-all duration-500 hover:shadow-2xl flex flex-col justify-between min-h-[320px] bg-gradient-to-br from-indigo-900 to-indigo-950`}>
+            <div className={`lg:col-span-2 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden transition-all duration-500 hover:shadow-2xl flex flex-col justify-between min-h-[320px] bg-gradient-to-br from-indigo-900/75 to-indigo-950/75 backdrop-blur-md`}>
               {/* Background abstract graphic elements */}
               <div className="absolute right-[-40px] top-[-40px] w-48 h-48 rounded-full bg-indigo-500/20 blur-3xl pointer-events-none" />
               <div className="absolute left-[-20px] bottom-[-20px] w-36 h-36 rounded-full bg-blue-500/10 blur-2xl pointer-events-none" />
@@ -2115,7 +2207,9 @@ while True:
             <div className="flex gap-4">
               <button 
                 onClick={async () => {
-                  const sensorsList = ["Temperature", "Light Intensity", "Humidity", "Hydrogen Ion Concentration", "Electrical Conductivity", "Dissolved Oxygen", "Carbon Dioxide"];
+                  const defaultSensors = ["Temperature", "Light Intensity", "Humidity", "Hydrogen Ion Concentration", "Electrical Conductivity", "Dissolved Oxygen", "Carbon Dioxide"];
+                  const customNames = customSensors.map(cs => cs.name);
+                  const sensorsList = [...defaultSensors, ...customNames];
                   const keys = sensorsList.map(s => `sf_sensor_config_${s.replace(/\s+/g, '_')}`);
                   const { data } = await supabase.from('app_settings').select('key, value').in('key', keys);
 
@@ -2126,6 +2220,18 @@ while True:
                     
                     const saved = localStorage.getItem(key);
                     if (saved) return { sensor: s, ...JSON.parse(saved) };
+
+                    const customSensor = customSensors.find(cs => cs.name === s);
+                    if (customSensor) {
+                      return {
+                        sensor: s,
+                        samplingRateValue: customSensor.samplingRateValue,
+                        samplingRateUnit: customSensor.samplingRateUnit,
+                        lowerThreshold: customSensor.lowerLimit,
+                        upperThreshold: customSensor.upperLimit,
+                        lastUpdated: new Date().toISOString()
+                      };
+                    }
                     
                     return { sensor: s, empty: true };
                   });
@@ -2837,6 +2943,34 @@ while True:
                 Generate the <code>data-logger.py</code> script configured with your current MQTT and Supabase settings to deploy on your Raspberry Pi.
               </p>
               
+              <div className="mb-6 bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <label className="block text-sm font-medium text-gray-700 mb-3">DB Transmission Interval (Per Topic)</label>
+                
+                {activeMqttTopics.length === 0 ? (
+                  <p className="text-sm text-gray-500 italic py-2">No MQTT topics configured in Hardware Pin Setup.</p>
+                ) : (
+                  <div className="space-y-2 mb-3 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
+                    {activeMqttTopics.map(topic => (
+                      <div key={topic} className="flex justify-between items-center bg-white p-2.5 border border-gray-200 rounded-md shadow-sm">
+                        <span className="text-sm font-mono text-gray-600 truncate mr-3 flex-1" title={topic}>{topic}</span>
+                        <div className="flex gap-2 items-center shrink-0">
+                          <input 
+                            type="number" 
+                            min="1" 
+                            value={dbSyncInterval[topic] || 5} 
+                            onChange={e => setDbSyncInterval(prev => ({ ...prev, [topic]: parseInt(e.target.value) || 5 }))} 
+                            className="w-16 p-1 text-center border border-gray-300 rounded focus:border-primary outline-none text-sm" 
+                          />
+                          <span className="text-xs text-gray-500 font-medium">mins</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                <p className="text-xs text-gray-500 mt-2">The logger will independently calculate the average for each MQTT topic over its defined period and send it to the database.</p>
+              </div>
+
               <div className="flex justify-start">
                 <button onClick={handleGeneratePythonCode} disabled={isGeneratingCode} className={`w-full flex justify-center items-center gap-2 bg-primary hover:bg-primary/90 text-white px-6 py-3 rounded-lg font-medium transition-all shadow-md ${isGeneratingCode ? 'bg-gray-400 cursor-not-allowed' : ''}`}>
                   {isGeneratingCode ? (
@@ -3033,6 +3167,7 @@ while True:
               <div className="mt-6 p-5 bg-light rounded-lg border border-gray-200 animate-in slide-in-from-bottom-4 fade-in duration-300">
                 <h4 className="mb-4 text-primary font-semibold text-lg">Confirm Settings</h4>
                 <p className="mb-2 text-gray-700"><strong>Sensor:</strong> {configSensor}</p>
+                <p className="mb-2 text-gray-700"><strong>Sampling Rate:</strong> {configRateValue} {configRateUnit}{parseFloat(configRateValue) > 1 ? 's' : ''}</p>
                 <p className="mb-2 text-gray-700"><strong>Lower Limit:</strong> {configLower} {getUnit(configSensor)}</p>
                 <p className="mb-4 text-gray-700"><strong>Upper Limit:</strong> {configUpper} {getUnit(configSensor)}</p>
                 <p className="mb-4 font-bold text-danger">Are these settings correct?</p>
