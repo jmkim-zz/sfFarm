@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { useSearchParams } from 'next/navigation';
-import { LayoutGrid, Play, Square, FolderOpen, SlidersHorizontal, CheckCircle, AlertTriangle, XCircle, Info, X, Cpu, Settings2, Users, CircuitBoard, Wifi, Copy, Download, Code, Server, Terminal, Database, Key, Cloud, FileCode2 } from 'lucide-react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { LayoutGrid, Play, ChevronRight, Square, FolderOpen, SlidersHorizontal, CheckCircle, AlertTriangle, XCircle, Info, X, Cpu, Settings2, Users, CircuitBoard, Wifi, Copy, Download, Code, Server, Terminal, Database, Key, Cloud, FileCode2, Tractor } from 'lucide-react';
 import { supabase } from '../../lib/supabase/client';
+import FacilitiesSettings from '../../components/settings/FacilitiesSettings';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 
 // 알림(Notification) 타입을 정의하고 관리하는 커스텀 훅
@@ -128,7 +129,7 @@ function MultiSelectDropdown({ options, selected, onChange }: {
 }
 
 // data-logger.py가 Supabase에 저장한 데이터를 실시간으로 가져오는 훅
-function useSupabaseSensors() {
+export function useSupabaseSensors(deviceId: string | null) {
   const [sensors, setSensors] = useState({
     temperature: 0, humidity: 0, light: 0, co2: 0, ph: 0, ec: 0, do: 0
   });
@@ -173,6 +174,7 @@ function useSupabaseSensors() {
       const { data, error } = await supabase
         .from('dynamic_telemetry')
         .select('*')
+        .eq('device_id', deviceId)
         .order('created_at', { ascending: false })
         .limit(20);
       
@@ -187,7 +189,7 @@ function useSupabaseSensors() {
       .channel('realtime-dynamic-telemetry-sensors')
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'dynamic_telemetry' },
+        { event: 'INSERT', schema: 'public', table: 'dynamic_telemetry', filter: `device_id=eq.${deviceId}` },
         (payload) => {
           const newData = payload.new;
           if (newData && newData.payload) {
@@ -215,7 +217,7 @@ function useSupabaseSensors() {
 }
 
 // 시스템 설정(센서/기기 사용 여부)을 관리하는 커스텀 훅
-function useSystemSettings() {
+export function useSystemSettings(deviceId: string | null, updateTrigger: number = 0) {
   const [activeSensors, setActiveSensors] = useState<Record<string, boolean>>({
     temperature: true, humidity: true, light: true, co2: true, ph: true, ec: true, do: true
   });
@@ -225,30 +227,30 @@ function useSystemSettings() {
 
   useEffect(() => {
     const loadSettings = async () => {
-      const { data: sensorData } = await supabase.from('app_settings').select('value').eq('key', 'sf_active_sensors').single();
-      const { data: equipData } = await supabase.from('app_settings').select('value').eq('key', 'sf_active_equipment').single();
+      const { data: sensorData } = await supabase.from('app_settings').select('value').eq('key', `sf_active_sensors_${deviceId}`).single();
+      const { data: equipData } = await supabase.from('app_settings').select('value').eq('key', `sf_active_equipment_${deviceId}`).single();
       
       if (sensorData?.value) setActiveSensors(sensorData.value);
       else {
-        const savedS = localStorage.getItem('sf_active_sensors');
+        const savedS = localStorage.getItem(`sf_active_sensors_${deviceId}`);
         if (savedS) setActiveSensors(JSON.parse(savedS));
       }
       
       if (equipData?.value) setActiveEquipment(equipData.value);
       else {
-        const savedE = localStorage.getItem('sf_active_equipment');
+        const savedE = localStorage.getItem(`sf_active_equipment_${deviceId}`);
         if (savedE) setActiveEquipment(JSON.parse(savedE));
       }
-    };
-    loadSettings();
-  }, []);
+      };
+      loadSettings();
+    }, [deviceId, updateTrigger]);
 
   const toggleSensor = (key: string) => {
     setActiveSensors(prev => {
       const currentVal = prev[key] !== false; // 하위 호환 및 커스텀 지원
       const next = { ...prev, [key]: !currentVal };
-      localStorage.setItem('sf_active_sensors', JSON.stringify(next));
-      supabase.from('app_settings').upsert({ key: 'sf_active_sensors', value: next }).then();
+      localStorage.setItem(`sf_active_sensors_${deviceId}`, JSON.stringify(next));
+      supabase.from('app_settings').upsert({ key: `sf_active_sensors_${deviceId}`, value: next }).then();
       return next;
     });
   };
@@ -257,8 +259,8 @@ function useSystemSettings() {
     setActiveEquipment(prev => {
       const currentVal = prev[key] !== false; // 값이 없으면(새 커스텀 기기) 기본 활성(true) 처리
       const next = { ...prev, [key]: !currentVal };
-      localStorage.setItem('sf_active_equipment', JSON.stringify(next));
-      supabase.from('app_settings').upsert({ key: 'sf_active_equipment', value: next }).then();
+      localStorage.setItem(`sf_active_equipment_${deviceId}`, JSON.stringify(next));
+      supabase.from('app_settings').upsert({ key: `sf_active_equipment_${deviceId}`, value: next }).then();
       return next;
     });
   };
@@ -267,7 +269,7 @@ function useSystemSettings() {
 }
 
 // 장비 상태를 관리하는 커스텀 훅
-function useEquipmentControl(showNotification: (msg: string, type: NotificationType) => void) {
+export function useEquipmentControl(deviceId: string | null, showNotification: (msg: string, type: NotificationType) => void) {
   const [equipment, setEquipment] = useState({
     circulationFan: true,
     growLight: true,
@@ -435,7 +437,7 @@ CREATE POLICY "Allow public read and write" ON app_settings FOR ALL USING (true)
 -- dynamic_telemetry 테이블을 supabase_realtime 복제 목록에 추가
 ALTER PUBLICATION supabase_realtime ADD TABLE dynamic_telemetry;`;
 
-const SENSOR_METADATA: Record<string, { label: string; unit: string; color: string; keys: string[] }> = {
+export const SENSOR_METADATA: Record<string, { label: string; unit: string; color: string; keys: string[] }> = {
   temperature: { label: 'Temperature', unit: '°C', color: '#e74c3c', keys: ['temp', 'temperature'] },
   humidity: { label: 'Humidity', unit: '%', color: '#3498db', keys: ['humid', 'humidity'] },
   light: { label: 'Light Intensity', unit: 'µmol/m²s', color: '#f1c40f', keys: ['ppfd', 'light_intensity', 'light'] },
@@ -505,13 +507,40 @@ const createXAxisTick = (dataPoints: any[]) => {
 };
 
 export default function DashboardClient() {
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const currentTab = searchParams.get('tab') || 'dashboard';
+  const currentTab = searchParams.get('tab') || 'home';
+
+  const currentDeviceId = searchParams.get('deviceId');
+  const [facilities, setFacilities] = useState<any[]>([]);
+  const [settingsUpdateTrigger, setSettingsUpdateTrigger] = useState(0);
+  
+  const fetchFacilities = async () => {
+    setSettingsUpdateTrigger(prev => prev + 1);
+    const { data } = await supabase.from('device_configs').select('*').order('device_id', { ascending: true });
+    if (data) setFacilities(data);
+  };
+
+  useEffect(() => {
+    fetchFacilities();
+
+    // Subscribe to changes in device_configs so facilities list updates immediately
+    const channel = supabase.channel('realtime-device-configs-dashboard')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'device_configs' }, () => {
+        fetchFacilities();
+      }).subscribe();
+      
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  const selectedFacility = facilities.find(f => f.device_id === currentDeviceId) || facilities[0];
+  const resolvedDeviceId = selectedFacility?.device_id;
+  const selectedFacilityName = selectedFacility ? (selectedFacility.description || selectedFacility.device_id) : 'Facility';
   const { notifications, showNotification, removeNotification } = useNotification();
-  const { equipment, customEquipmentStates, setCustomEquipmentStates, toggleEquipment, startAll, stopAll } = useEquipmentControl(showNotification);
+  const { equipment, customEquipmentStates, setCustomEquipmentStates, toggleEquipment, startAll, stopAll } = useEquipmentControl(resolvedDeviceId, showNotification);
 
   // 💡 여기서 설정한 값들을 꺼내옵니다. 이 코드가 누락되어서 에러가 발생했었습니다!
-  const { activeSensors, activeEquipment, toggleSensor, toggleEquipmentSetting } = useSystemSettings();
+  const { activeSensors, activeEquipment, toggleSensor, toggleEquipmentSetting } = useSystemSettings(resolvedDeviceId);
   const equipmentNamesList = { circulationFan: 'Circulation Fan', growLight: 'Grow Light', hvac: 'HVAC', humidifier: 'Humidifier', co2Generator: 'CO2 Generator', waterPump: 'Water Pump', solenoidValve: 'Solenoid Valve', dosingPump: 'Dosing Pump', airPump: 'Air Pump' };
 
   // Home tab states
@@ -649,6 +678,7 @@ export default function DashboardClient() {
       let query = supabase
         .from('dynamic_telemetry')
         .select('created_at, payload')
+        .eq('device_id', resolvedDeviceId)
         .order('created_at', { ascending: true });
 
       if (mode === 'realtime') {
@@ -715,7 +745,7 @@ export default function DashboardClient() {
       .channel('realtime-telemetry')
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'dynamic_telemetry' },
+        { event: 'INSERT', schema: 'public', table: 'dynamic_telemetry', filter: `device_id=eq.${resolvedDeviceId}` },
         (payload) => {
           console.log('Realtime telemetry event received:', payload);
           const newRow = payload.new;
@@ -834,10 +864,10 @@ export default function DashboardClient() {
   // 커스텀 장비 설정 로드
   useEffect(() => {
     const loadCustomEq = async () => {
-      const { data } = await supabase.from('app_settings').select('value').eq('key', 'sf_custom_equipment').single();
+      const { data } = await supabase.from('app_settings').select('value').eq('key', `sf_custom_equipment_${currentDeviceId}`).single();
       let parsed = data?.value;
       if (!parsed) {
-        const saved = localStorage.getItem('sf_custom_equipment');
+        const saved = localStorage.getItem(`sf_custom_equipment_${currentDeviceId}`);
         if (saved) parsed = JSON.parse(saved);
       }
       if (parsed) {
@@ -848,15 +878,15 @@ export default function DashboardClient() {
       }
     };
     loadCustomEq();
-  }, []);
+    }, [currentDeviceId]);
 
   // 커스텀 센서 설정 로드
   useEffect(() => {
     const loadCustomSensors = async () => {
-      const { data } = await supabase.from('app_settings').select('value').eq('key', 'sf_custom_sensors').single();
+      const { data } = await supabase.from('app_settings').select('value').eq('key', `sf_custom_sensors_${currentDeviceId}`).single();
       let parsed = data?.value;
       if (!parsed) {
-        const saved = localStorage.getItem('sf_custom_sensors');
+        const saved = localStorage.getItem(`sf_custom_sensors_${currentDeviceId}`);
         if (saved) parsed = JSON.parse(saved);
       }
       if (parsed) {
@@ -864,7 +894,7 @@ export default function DashboardClient() {
       }
     };
     loadCustomSensors();
-  }, []);
+    }, [currentDeviceId]);
 
   const handleSaveCustomEquipment = async () => {
     if (!newEqName.trim()) return showNotification('Please enter the equipment name.', 'warning');
@@ -872,8 +902,8 @@ export default function DashboardClient() {
     const updatedList = [...customEquipments, newEq];
     setCustomEquipments(updatedList);
     setCustomEquipmentStates(prev => ({ ...prev, [newEq.id]: false }));
-    await supabase.from('app_settings').upsert({ key: 'sf_custom_equipment', value: updatedList });
-    localStorage.setItem('sf_custom_equipment', JSON.stringify(updatedList));
+    await supabase.from('app_settings').upsert({ key: `sf_custom_equipment_${currentDeviceId}`, value: updatedList });
+    localStorage.setItem(`sf_custom_equipment_${currentDeviceId}`, JSON.stringify(updatedList));
     showNotification(`${newEqName} added successfully!`, 'success');
     setIsAddEqModalOpen(false);
     setNewEqName('');
@@ -912,8 +942,8 @@ export default function DashboardClient() {
 
     const updatedList = [...customSensors, newSensor];
     setCustomSensors(updatedList);
-    await supabase.from('app_settings').upsert({ key: 'sf_custom_sensors', value: updatedList });
-    localStorage.setItem('sf_custom_sensors', JSON.stringify(updatedList));
+    await supabase.from('app_settings').upsert({ key: `sf_custom_sensors_${currentDeviceId}`, value: updatedList });
+    localStorage.setItem(`sf_custom_sensors_${currentDeviceId}`, JSON.stringify(updatedList));
     showNotification(`${newSensorName} added successfully!`, 'success');
     
     setIsAddSensorModalOpen(false);
@@ -944,7 +974,7 @@ export default function DashboardClient() {
     const { data } = await supabase.from('app_settings').select('key, value').in('key', keys);
     
     equipList.forEach(e => {
-      const key = `sf_equip_schedule_${e}`;
+      const key = `sf_equip_schedule_${currentDeviceId}_${e}`;
       const dbItem = data?.find(d => d.key === key);
       if (dbItem?.value) {
         newSchedules[e] = dbItem.value;
@@ -958,7 +988,7 @@ export default function DashboardClient() {
 
   useEffect(() => {
     loadAllEquipSchedules();
-  }, [customEquipments]);
+    }, [customEquipments, currentDeviceId]);
 
   useEffect(() => {
     if (isEquipConfigModalOpen) {
@@ -993,7 +1023,7 @@ export default function DashboardClient() {
     const stopStr = `${equipStopAmPm} ${equipStopHour.padStart(2, '0')}:${equipStopMinute.padStart(2, '0')}`;
     const scheduleData = { start: startStr, stop: stopStr, isContinuous: equipIsContinuous };
 
-    const key = `sf_equip_schedule_${configEquip}`;
+    const key = `sf_equip_schedule_${currentDeviceId}_${configEquip}`;
     await supabase.from('app_settings').upsert({ key, value: scheduleData });
     localStorage.setItem(key, JSON.stringify(scheduleData));
     
@@ -1093,7 +1123,7 @@ export default function DashboardClient() {
   useEffect(() => {
     const loadConfig = async () => {
       if (isConfigModalOpen) {
-        const key = `sf_sensor_config_${configSensor.replace(/\s+/g, '_')}`;
+        const key = `sf_sensor_config_${currentDeviceId}_${configSensor.replace(/\s+/g, '_')}`;
         const { data } = await supabase.from('app_settings').select('value').eq('key', key).single();
         let parsed = data?.value;
         
@@ -1153,7 +1183,7 @@ export default function DashboardClient() {
     const { data } = await supabase.from('app_settings').select('key, value').in('key', keys);
     
     sensorsList.forEach(s => {
-      const key = `sf_sensor_config_${s.replace(/\s+/g, '_')}`;
+      const key = `sf_sensor_config_${currentDeviceId}_${s.replace(/\s+/g, '_')}`;
       const dbItem = data?.find(d => d.key === key);
       if (dbItem?.value) {
         newConfigs[s] = dbItem.value;
@@ -1179,7 +1209,7 @@ export default function DashboardClient() {
 
   useEffect(() => {
     loadAllSensorConfigs();
-  }, [customSensors]);
+    }, [customSensors, currentDeviceId]);
   
   // 아두이노 핀 연결 상태 관리
   // 사용자가 쉽게 테스트할 수 있도록 자주 쓰이는 센서/기기를 기본값으로 세팅
@@ -1226,7 +1256,7 @@ export default function DashboardClient() {
   const [isAgentModalOpen, setIsAgentModalOpen] = useState(false);
 
   // Supabase 실시간 센서 데이터 연동
-  const sensors = useSupabaseSensors();
+  const sensors = useSupabaseSensors(currentDeviceId);
 
   // Network & MQTT Configuration 로드
   useEffect(() => {
@@ -1622,7 +1652,7 @@ while True:
       lastUpdated: new Date().toISOString()
     };
     
-    const key = `sf_sensor_config_${configSensor.replace(/\s+/g, '_')}`;
+    const key = `sf_sensor_config_${currentDeviceId}_${configSensor.replace(/\s+/g, '_')}`;
     await supabase.from('app_settings').upsert({ key, value: configData });
     localStorage.setItem(key, JSON.stringify(configData));
     
@@ -1720,9 +1750,28 @@ while True:
             )}
           </div>
 
+          {/* Quick Setup Banner */}
+          <div className="bg-gradient-to-r from-secondary/10 to-primary/5 rounded-2xl p-6 border border-secondary/20 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
+            <div>
+              <h3 className="text-lg font-bold text-primary flex items-center gap-2">
+                <Tractor size={20} className="text-secondary" />
+                Facility Configuration Required
+              </h3>
+              <p className="text-sm text-gray-600 mt-1">
+                시스템을 사용하기 전에 가장 먼저 시설(온실/베드)을 등록하고 센서 및 장비를 설정해주세요.
+              </p>
+            </div>
+            <button
+              onClick={() => router.push('?tab=facilities')}
+              className="whitespace-nowrap px-6 py-3 bg-secondary hover:bg-secondary-dark text-white rounded-xl font-semibold shadow-md transition-all flex items-center gap-2"
+            >
+              Go to Facilities Settings <ChevronRight size={18} />
+            </button>
+          </div>
+
           {/* Grid Layout: Weather and System connections */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
+
             {/* Weather Card - Glassmorphism style */}
             <div className={`lg:col-span-2 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden transition-all duration-500 hover:shadow-2xl flex flex-col justify-between min-h-[320px] bg-gradient-to-br from-indigo-900/75 to-indigo-950/75 backdrop-blur-md`}>
               {/* Background abstract graphic elements */}
@@ -2009,7 +2058,28 @@ while True:
       )}
 
       {currentTab === 'dashboard' && (
-        <div>
+        <div className="animate-[fadeIn_0.5s_ease-in-out]">
+          {/* Facility Selector */}
+          <div className="flex gap-2 overflow-x-auto pb-2 mb-6 hide-scrollbar">
+            {facilities.map(f => {
+              const isSelected = (currentDeviceId === f.device_id) || (!currentDeviceId && f === facilities[0]);
+              return (
+                <button 
+                  key={f.device_id}
+                  onClick={() => router.push(`?tab=${currentTab}&deviceId=${f.device_id}`)}
+                  className={`px-5 py-2 rounded-full text-sm font-semibold transition-all whitespace-nowrap border flex items-center gap-2 ${
+                    isSelected 
+                      ? 'bg-secondary text-white border-secondary shadow-md' 
+                      : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50 hover:border-gray-300'
+                  }`}
+                >
+                  {f.description || f.device_id}
+                  {isSelected && <span className="w-2 h-2 rounded-full bg-white ml-1"></span>}
+                </button>
+              )
+            })}
+          </div>
+
           {/* Header */}
           <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6">
             <h2 className="text-2xl font-semibold text-primary">Dashboard Overview</h2>
@@ -2202,8 +2272,29 @@ while True:
 
       {currentTab === 'sensors' && (
         <div>
+            {/* Facility Selector */}
+            <div className="flex gap-2 overflow-x-auto pb-2 mb-6 hide-scrollbar">
+              {facilities.map(f => {
+                const isSelected = (currentDeviceId === f.device_id) || (!currentDeviceId && f === facilities[0]);
+                return (
+                  <button 
+                    key={f.device_id}
+                    onClick={() => router.push(`?tab=${currentTab}&deviceId=${f.device_id}`)}
+                    className={`px-5 py-2 rounded-full text-sm font-semibold transition-all whitespace-nowrap border flex items-center gap-2 ${
+                      isSelected 
+                        ? 'bg-secondary text-white border-secondary shadow-md' 
+                        : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50 hover:border-gray-300'
+                    }`}
+                  >
+                    {f.description || f.device_id}
+                    {isSelected && <span className="w-2 h-2 rounded-full bg-white ml-1"></span>}
+                  </button>
+                )
+              })}
+            </div>
+
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-semibold text-primary">Sensor Monitoring</h2>
+            <h2 className="text-2xl font-semibold text-primary">Sensor Settings</h2>
             <div className="flex gap-4">
               <button 
                 onClick={async () => {
@@ -2214,7 +2305,7 @@ while True:
                   const { data } = await supabase.from('app_settings').select('key, value').in('key', keys);
 
                   const configs = sensorsList.map(s => {
-                    const key = `sf_sensor_config_${s.replace(/\s+/g, '_')}`;
+                    const key = `sf_sensor_config_${currentDeviceId}_${s.replace(/\s+/g, '_')}`;
                     const dbItem = data?.find(d => d.key === key);
                     if (dbItem?.value) return { sensor: s, ...dbItem.value };
                     
@@ -2388,6 +2479,27 @@ while True:
 
       {currentTab === 'equipment' && (
         <div>
+            {/* Facility Selector */}
+            <div className="flex gap-2 overflow-x-auto pb-2 mb-6 hide-scrollbar">
+              {facilities.map(f => {
+                const isSelected = (currentDeviceId === f.device_id) || (!currentDeviceId && f === facilities[0]);
+                return (
+                  <button 
+                    key={f.device_id}
+                    onClick={() => router.push(`?tab=${currentTab}&deviceId=${f.device_id}`)}
+                    className={`px-5 py-2 rounded-full text-sm font-semibold transition-all whitespace-nowrap border flex items-center gap-2 ${
+                      isSelected 
+                        ? 'bg-secondary text-white border-secondary shadow-md' 
+                        : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50 hover:border-gray-300'
+                    }`}
+                  >
+                    {f.description || f.device_id}
+                    {isSelected && <span className="w-2 h-2 rounded-full bg-white ml-1"></span>}
+                  </button>
+                )
+              })}
+            </div>
+
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-semibold text-primary">Equipment Control</h2>
             <div className="flex gap-4">
@@ -2504,46 +2616,7 @@ while True:
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-semibold text-primary">System Settings</h2>
           </div>
-          <div className="grid md:grid-cols-2 gap-8">
-            <div className="bg-white rounded-xl p-6 shadow-sm border-t-4 border-primary">
-              <h3 className="text-lg font-semibold text-primary mb-4 flex items-center gap-2"><Cpu size={20}/> Sensor Availability</h3>
-              <div className="flex flex-col gap-3">
-                {Object.entries({ temperature: 'Temperature', humidity: 'Humidity', light: 'Light Intensity', co2: 'Carbon Dioxide', ph: 'Hydrogen Ion Concentration', ec: 'Electrical Conductivity', do: 'Dissolved Oxygen' }).map(([key, label]) => (
-                  <label key={key} className="flex items-center gap-3 cursor-pointer p-2 hover:bg-light rounded-lg transition-colors">
-                    <input type="checkbox" checked={activeSensors[key]} onChange={() => toggleSensor(key)} className="w-5 h-5 accent-secondary cursor-pointer" />
-                    <span className="text-gray-700 font-medium">{label}</span>
-                  </label>
-                ))}
-                {customSensors.map((sensor) => (
-                  <label key={sensor.id} className="flex items-center gap-3 cursor-pointer p-2 hover:bg-light rounded-lg transition-colors">
-                    <input type="checkbox" checked={activeSensors[sensor.id] !== false} onChange={() => toggleSensor(sensor.id)} className="w-5 h-5 accent-secondary cursor-pointer" />
-                    <span className="text-gray-700 font-medium">{sensor.name} <span className="text-[10px] text-info border border-info px-1.5 py-0.5 rounded-full ml-1 font-bold">Custom</span></span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl p-6 shadow-sm border-t-4 border-secondary">
-              <h3 className="text-lg font-semibold text-primary mb-4 flex items-center gap-2"><Settings2 size={20}/> Equipment Availability</h3>
-              <div className="flex flex-col gap-3">
-                {Object.entries(equipmentNamesList).map(([key, label]) => (
-                  <label key={key} className="flex items-center gap-3 cursor-pointer p-2 hover:bg-light rounded-lg transition-colors">
-                    <input type="checkbox" checked={activeEquipment[key] !== false} onChange={() => toggleEquipmentSetting(key)} className="w-5 h-5 accent-secondary cursor-pointer" />
-                    <span className="text-gray-700 font-medium">{label}</span>
-                  </label>
-                ))}
-                {customEquipments.map((eq) => (
-                  <label key={eq.id} className="flex items-center gap-3 cursor-pointer p-2 hover:bg-light rounded-lg transition-colors">
-                    <input type="checkbox" checked={activeEquipment[eq.id] !== false} onChange={() => toggleEquipmentSetting(eq.id)} className="w-5 h-5 accent-secondary cursor-pointer" />
-                    <span className="text-gray-700 font-medium">{eq.name} <span className="text-[10px] text-info border border-info px-1.5 py-0.5 rounded-full ml-1 font-bold">Custom</span></span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <hr className="border-0 border-t border-gray-200 my-10" />
-
+          
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-semibold text-primary">Global Environment Configurations</h2>
             <span className="text-sm text-gray-500">For new deployments and system overrides</span>
@@ -2742,6 +2815,27 @@ while True:
       {/* Arduino Setting Tab */}
       {currentTab === 'arduino' && (
         <div className="animate-[fadeIn_0.5s_ease-in-out]">
+            {/* Facility Selector */}
+            <div className="flex gap-2 overflow-x-auto pb-2 mb-6 hide-scrollbar">
+              {facilities.map(f => {
+                const isSelected = (currentDeviceId === f.device_id) || (!currentDeviceId && f === facilities[0]);
+                return (
+                  <button 
+                    key={f.device_id}
+                    onClick={() => router.push(`?tab=${currentTab}&deviceId=${f.device_id}`)}
+                    className={`px-5 py-2 rounded-full text-sm font-semibold transition-all whitespace-nowrap border flex items-center gap-2 ${
+                      isSelected 
+                        ? 'bg-secondary text-white border-secondary shadow-md' 
+                        : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50 hover:border-gray-300'
+                    }`}
+                  >
+                    {f.description || f.device_id}
+                    {isSelected && <span className="w-2 h-2 rounded-full bg-white ml-1"></span>}
+                  </button>
+                )
+              })}
+            </div>
+
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-semibold text-primary">Arduino Setting</h2>
           </div>
@@ -2908,8 +3002,35 @@ while True:
       )}
 
       {/* Raspberry Setting Tab */}
+
+      {currentTab === 'facilities' && (
+        <div className="animate-[fadeIn_0.5s_ease-in-out]">
+          <FacilitiesSettings showNotification={showNotification} onFacilitiesChange={fetchFacilities} />
+        </div>
+      )}
       {currentTab === 'raspberry' && (
         <div className="animate-[fadeIn_0.5s_ease-in-out]">
+            {/* Facility Selector */}
+            <div className="flex gap-2 overflow-x-auto pb-2 mb-6 hide-scrollbar">
+              {facilities.map(f => {
+                const isSelected = (currentDeviceId === f.device_id) || (!currentDeviceId && f === facilities[0]);
+                return (
+                  <button 
+                    key={f.device_id}
+                    onClick={() => router.push(`?tab=${currentTab}&deviceId=${f.device_id}`)}
+                    className={`px-5 py-2 rounded-full text-sm font-semibold transition-all whitespace-nowrap border flex items-center gap-2 ${
+                      isSelected 
+                        ? 'bg-secondary text-white border-secondary shadow-md' 
+                        : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50 hover:border-gray-300'
+                    }`}
+                  >
+                    {f.description || f.device_id}
+                    {isSelected && <span className="w-2 h-2 rounded-full bg-white ml-1"></span>}
+                  </button>
+                )
+              })}
+            </div>
+
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-semibold text-primary">Raspberry Pi Data Logger</h2>
           </div>

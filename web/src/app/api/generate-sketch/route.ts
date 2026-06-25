@@ -14,6 +14,8 @@ export async function POST(request: Request) {
 
     const systemInstruction = `You are an expert C++ firmware developer for Arduino.
 Follow these strict rules:
+  CRITICAL 1. You MUST use the provided 'networkInfo.facilityMqttTopic' as the MQTT topic for publishing all sensor telemetry data.
+  CRITICAL 2. You MUST use the provided 'networkInfo.controlMqttTopic' as the MQTT topic for subscribing to all actuator control commands.
 1. delay() 함수 사용을 절대 금지하며, 반드시 millis() 기반의 비동기 유한 상태 기계(FSM) 패턴으로 각 센서의 측정 주기를 제어할 것.
 2. I2C 센서 통신 오류 시 NaN 값을 필터링하는 방어 로직을 넣을 것.
 3. UART 통신 기기(예: Atlas EZO pH) 수신 및 파싱 규칙:
