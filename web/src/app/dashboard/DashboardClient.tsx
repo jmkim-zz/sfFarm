@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { LayoutGrid, Play, ChevronRight, Square, FolderOpen, SlidersHorizontal, CheckCircle, AlertTriangle, XCircle, Info, X, Cpu, Settings2, Users, CircuitBoard, Wifi, Copy, Download, Code, Server, Terminal, Database, Key, Cloud, FileCode2, Tractor } from 'lucide-react';
 import { supabase } from '../../lib/supabase/client';
 import FacilitiesSettings from '../../components/settings/FacilitiesSettings';
+import FacilityOverviewCard from '../../components/dashboard/FacilityOverviewCard';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 
 // 알림(Notification) 타입을 정의하고 관리하는 커스텀 훅
@@ -186,7 +187,7 @@ export function useSupabaseSensors(deviceId: string | null) {
 
     // 2. 새로운 데이터가 INSERT 될 때마다 실시간 수신
     const channel = supabase
-      .channel('realtime-dynamic-telemetry-sensors')
+      .channel(`realtime-dynamic-telemetry-sensors-${deviceId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'dynamic_telemetry', filter: `device_id=eq.${deviceId}` },
@@ -300,44 +301,45 @@ export function useEquipmentControl(deviceId: string | null, showNotification: (
   // 컴포넌트 마운트 시 기기 온/오프 상태 로드
   useEffect(() => {
     const loadEquipmentStates = async () => {
+      if (!deviceId) return;
       try {
-        const { data: equipStatus } = await supabase.from('app_settings').select('value').eq('key', 'sf_equipment_status').single();
-        const { data: customEquipStatus } = await supabase.from('app_settings').select('value').eq('key', 'sf_custom_equipment_status').single();
+        const { data: equipStatus } = await supabase.from('app_settings').select('value').eq('key', `sf_equipment_status_${deviceId}`).single();
+        const { data: customEquipStatus } = await supabase.from('app_settings').select('value').eq('key', `sf_custom_equipment_status_${deviceId}`).single();
 
         if (equipStatus?.value) {
-          setEquipment(equipStatus.value);
+          setEquipment(prev => ({ ...prev, ...equipStatus.value }));
         } else {
-          const saved = localStorage.getItem('sf_equipment_status');
-          if (saved) setEquipment(JSON.parse(saved));
+          const saved = localStorage.getItem(`sf_equipment_status_${deviceId}`);
+          if (saved) setEquipment(prev => ({ ...prev, ...JSON.parse(saved) }));
         }
 
         if (customEquipStatus?.value) {
-          setCustomEquipmentStates(customEquipStatus.value);
+          setCustomEquipmentStates(prev => ({ ...prev, ...customEquipStatus.value }));
         } else {
-          const savedCustom = localStorage.getItem('sf_custom_equipment_status');
-          if (savedCustom) setCustomEquipmentStates(JSON.parse(savedCustom));
+          const savedCustom = localStorage.getItem(`sf_custom_equipment_status_${deviceId}`);
+          if (savedCustom) setCustomEquipmentStates(prev => ({ ...prev, ...JSON.parse(savedCustom) }));
         }
       } catch (err) {
         console.error('Failed to load equipment status:', err);
       }
     };
     loadEquipmentStates();
-  }, []);
+  }, [deviceId]);
 
   const toggleEquipment = (key: string, state: boolean, isCustom: boolean = false, customName: string = '') => {
     if (isCustom) {
       setCustomEquipmentStates(prev => {
         const next = { ...prev, [key]: state };
-        localStorage.setItem('sf_custom_equipment_status', JSON.stringify(next));
-        supabase.from('app_settings').upsert({ key: 'sf_custom_equipment_status', value: next }).then();
+        localStorage.setItem(`sf_custom_equipment_status_${deviceId}`, JSON.stringify(next));
+        supabase.from('app_settings').upsert({ key: `sf_custom_equipment_status_${deviceId}`, value: next }).then();
         return next;
       });
       showNotification(`${customName} ${state ? 'activated' : 'deactivated'}`, 'success');
     } else {
       setEquipment(prev => {
         const next = { ...prev, [key as keyof typeof equipment]: state };
-        localStorage.setItem('sf_equipment_status', JSON.stringify(next));
-        supabase.from('app_settings').upsert({ key: 'sf_equipment_status', value: next }).then();
+        localStorage.setItem(`sf_equipment_status_${deviceId}`, JSON.stringify(next));
+        supabase.from('app_settings').upsert({ key: `sf_equipment_status_${deviceId}`, value: next }).then();
         return next;
       });
       showNotification(`${equipmentNames[key as keyof typeof equipment]} ${state ? 'activated' : 'deactivated'}`, 'success');
@@ -347,13 +349,13 @@ export function useEquipmentControl(deviceId: string | null, showNotification: (
   const startAll = () => {
     const allOn = Object.keys(equipment).reduce((acc, key) => ({ ...acc, [key]: true }), {} as typeof equipment);
     setEquipment(allOn);
-    localStorage.setItem('sf_equipment_status', JSON.stringify(allOn));
-    supabase.from('app_settings').upsert({ key: 'sf_equipment_status', value: allOn }).then();
+    localStorage.setItem(`sf_equipment_status_${deviceId}`, JSON.stringify(allOn));
+    supabase.from('app_settings').upsert({ key: `sf_equipment_status_${deviceId}`, value: allOn }).then();
 
     const allCustomOn = Object.keys(customEquipmentStates).reduce((acc, key) => ({ ...acc, [key]: true }), {});
     setCustomEquipmentStates(allCustomOn);
-    localStorage.setItem('sf_custom_equipment_status', JSON.stringify(allCustomOn));
-    supabase.from('app_settings').upsert({ key: 'sf_custom_equipment_status', value: allCustomOn }).then();
+    localStorage.setItem(`sf_custom_equipment_status_${deviceId}`, JSON.stringify(allCustomOn));
+    supabase.from('app_settings').upsert({ key: `sf_custom_equipment_status_${deviceId}`, value: allCustomOn }).then();
 
     showNotification('Starting all equipment...', 'success');
   };
@@ -361,13 +363,13 @@ export function useEquipmentControl(deviceId: string | null, showNotification: (
   const stopAll = () => {
     const allOff = Object.keys(equipment).reduce((acc, key) => ({ ...acc, [key]: false }), {} as typeof equipment);
     setEquipment(allOff);
-    localStorage.setItem('sf_equipment_status', JSON.stringify(allOff));
-    supabase.from('app_settings').upsert({ key: 'sf_equipment_status', value: allOff }).then();
+    localStorage.setItem(`sf_equipment_status_${deviceId}`, JSON.stringify(allOff));
+    supabase.from('app_settings').upsert({ key: `sf_equipment_status_${deviceId}`, value: allOff }).then();
 
     const allCustomOff = Object.keys(customEquipmentStates).reduce((acc, key) => ({ ...acc, [key]: false }), {});
     setCustomEquipmentStates(allCustomOff);
-    localStorage.setItem('sf_custom_equipment_status', JSON.stringify(allCustomOff));
-    supabase.from('app_settings').upsert({ key: 'sf_custom_equipment_status', value: allCustomOff }).then();
+    localStorage.setItem(`sf_custom_equipment_status_${deviceId}`, JSON.stringify(allCustomOff));
+    supabase.from('app_settings').upsert({ key: `sf_custom_equipment_status_${deviceId}`, value: allCustomOff }).then();
 
     showNotification('Stopping all equipment...', 'warning');
   };
@@ -404,6 +406,7 @@ CREATE TABLE IF NOT EXISTS device_configs (
     mqtt_topic TEXT NOT NULL,             -- 구독할 토픽 (예: 'smartfarm/uno-r4-001/sensors')
     is_active BOOLEAN DEFAULT true,       -- 데이터 수집 활성화 여부
     description TEXT,                     -- 기기 설명
+    crops JSONB DEFAULT '[]'::jsonb,      -- 재배 작물 목록 (아이콘 포함 JSON 배열)
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -433,9 +436,10 @@ CREATE TABLE app_settings (
 ALTER TABLE app_settings ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow public read and write" ON app_settings FOR ALL USING (true) WITH CHECK (true);
 
--- 3. 실시간 차트 업데이트를 위한 설정
--- dynamic_telemetry 테이블을 supabase_realtime 복제 목록에 추가
-ALTER PUBLICATION supabase_realtime ADD TABLE dynamic_telemetry;`;
+-- 3. 실시간 차트 및 상태 업데이트를 위한 설정
+-- dynamic_telemetry 및 device_configs 테이블을 supabase_realtime 복제 목록에 추가
+ALTER PUBLICATION supabase_realtime ADD TABLE dynamic_telemetry;
+ALTER PUBLICATION supabase_realtime ADD TABLE device_configs;`;
 
 export const SENSOR_METADATA: Record<string, { label: string; unit: string; color: string; keys: string[] }> = {
   temperature: { label: 'Temperature', unit: '°C', color: '#e74c3c', keys: ['temp', 'temperature'] },
@@ -779,7 +783,7 @@ export default function DashboardClient() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [dashboardMode]);
+  }, [dashboardMode, resolvedDeviceId]);
 
   // Auth Status (Supabase)
   const [user, setUser] = useState<any>(null);
@@ -1268,12 +1272,6 @@ export default function DashboardClient() {
         setMqttServer(data.value.mqttServer || '');
         setMqttUsername(data.value.mqttUsername || '');
         setMqttPassword(data.value.mqttPassword || '');
-      }
-      
-      // 라즈베리파이 원격 로거 상태 로드
-      const { data: loggerData } = await supabase.from('app_settings').select('value').eq('key', 'sf_logger_status').single();
-      if (loggerData?.value) {
-        setRemoteLoggerRunning(loggerData.value.running || false);
       } else {
         const savedWifiSsid = localStorage.getItem('sf_wifi_ssid');
         const savedWifiPass = localStorage.getItem('sf_wifi_password');
@@ -1306,6 +1304,20 @@ export default function DashboardClient() {
     loadNetworkSettings();
   }, []);
 
+  // 라즈베리파이 원격 로거 상태 로드
+  useEffect(() => {
+    const loadLoggerStatus = async () => {
+      if (!resolvedDeviceId) return;
+      const { data: loggerData } = await supabase.from('app_settings').select('value').eq('key', `sf_logger_status_${resolvedDeviceId}`).single();
+      if (loggerData?.value) {
+        setRemoteLoggerRunning(loggerData.value.running || false);
+      } else {
+        setRemoteLoggerRunning(false);
+      }
+    };
+    loadLoggerStatus();
+  }, [resolvedDeviceId]);
+
   // Network & MQTT Configuration 저장
   const handleSaveNetworkConfig = async () => {
     const networkData = { wifiSsid, wifiPassword, mqttServer, mqttUsername, mqttPassword };
@@ -1322,11 +1334,22 @@ export default function DashboardClient() {
   // Hardware Pin Configuration 로드
   useEffect(() => {
     const loadHardwareSettings = async () => {
-      const { data } = await supabase.from('app_settings').select('value').eq('key', 'sf_hardware_pins').single();
+      if (!currentDeviceId) return;
+      
+      let { data } = await supabase.from('app_settings').select('value').eq('key', `sf_hardware_pins_${currentDeviceId}`).single();
       let parsed = data?.value;
       if (!parsed) {
-        const saved = localStorage.getItem('sf_hardware_pins');
+        const saved = localStorage.getItem(`sf_hardware_pins_${currentDeviceId}`);
         if (saved) parsed = JSON.parse(saved);
+      }
+      
+      // 기기 변경 시 초기화
+      if (!parsed) {
+        setPinConfigs({});
+        setPinMappings({});
+        setPinMqttTopics({});
+        setPinCounts({});
+        return;
       }
       if (parsed) {
         if (parsed.pinConfigs) setPinConfigs(parsed.pinConfigs);
@@ -1373,20 +1396,21 @@ export default function DashboardClient() {
       }
     };
     loadHardwareSettings();
-  }, []);
+  }, [currentDeviceId]);
 
   // Hardware Pin Configuration 저장
   const handleSaveHardwareConfig = async () => {
+    if (!currentDeviceId) return;
     const hardwareData = { pinConfigs, pinMappings, pinMqttTopics, pinCounts };
-    await supabase.from('app_settings').upsert({ key: 'sf_hardware_pins', value: hardwareData });
-    localStorage.setItem('sf_hardware_pins', JSON.stringify(hardwareData));
-    showNotification('Hardware pin configuration saved!', 'success');
+    await supabase.from('app_settings').upsert({ key: `sf_hardware_pins_${currentDeviceId}`, value: hardwareData });
+    localStorage.setItem(`sf_hardware_pins_${currentDeviceId}`, JSON.stringify(hardwareData));
+    showNotification(`Hardware pin configuration saved for ${currentDeviceId}!`, 'success');
   };
 
   // 라즈베리파이 원격 로거 시작/정지 토글 함수
   const handleToggleRemoteLogger = async (state: boolean) => {
     setRemoteLoggerRunning(state);
-    await supabase.from('app_settings').upsert({ key: 'sf_logger_status', value: { running: state } });
+    await supabase.from('app_settings').upsert({ key: `sf_logger_status_${resolvedDeviceId}`, value: { running: state } });
     showNotification(state ? 'Start command sent to Raspberry Pi Agent!' : 'Stop command sent to Raspberry Pi Agent.', state ? 'success' : 'warning');
   };
 
@@ -1429,12 +1453,23 @@ export default function DashboardClient() {
         return { ...prev, [pinId]: next };
       });
     } else {
-      // 매핑 항목 수에 맞게 MQTT Topic 배열 개수도 동기화
+      // 매핑 항목 수에 맞게 MQTT Topic 배열 개수도 동기화 (자동 생성)
       setPinMqttTopics(prev => {
         const current = prev[pinId] || [];
         const next = [...current];
-        const currentTopics = next[index] || [];
-        const newTopics = value.map((_, i) => currentTopics[i] !== undefined ? currentTopics[i] : '');
+        const newTopics = value.map(mappingVal => {
+          if (mappingVal === 'none') return '';
+          
+          // Check if mappingVal is an equipment
+          const isEquipment = Object.keys(equipmentNamesList).includes(mappingVal) || customEquipments.some(eq => eq.id === mappingVal);
+          
+          // Auto-generate topic based on type
+          if (isEquipment) {
+            return `smartfarm/${currentDeviceId || 'pooh'}/equipment/${mappingVal}`;
+          } else {
+            return `smartfarm/${currentDeviceId || 'pooh'}/${mappingVal}`;
+          }
+        });
         next[index] = newTopics;
         return { ...prev, [pinId]: next };
       });
@@ -1483,7 +1518,13 @@ export default function DashboardClient() {
     try {
       const payload = {
         boardInfo: { model: selectedArduinoBoard },
-        networkInfo: { wifiSsid, mqttServer, mqttUsername },
+        networkInfo: { 
+          wifiSsid, 
+          wifiPassword, 
+          mqttServer: mqttServer.replace(/^(mqtts?:\/\/)/, ''), 
+          mqttUsername, 
+          mqttPassword 
+        },
         hardwarePins: {
           configs: pinConfigs,
           mappings: pinMappings,
@@ -1526,19 +1567,30 @@ export default function DashboardClient() {
     }
   };
 
-  const activeMqttTopics = useMemo(() => {
-    const topics = new Set<string>();
-    Object.values(pinMqttTopics).forEach(group => {
-      group.forEach(row => {
-        row.forEach(topic => {
-          if (topic && topic.trim() !== '' && topic.trim() !== 'none') {
-            topics.add(topic.trim());
-          }
-        });
-      });
+  const activeSensorsList = useMemo(() => {
+    const list: { id: string, label: string }[] = [];
+    Object.keys(SENSOR_METADATA).forEach(key => {
+      if (activeSensors[key] !== false) {
+        list.push({ id: key, label: SENSOR_METADATA[key].label });
+      }
     });
-    return Array.from(topics);
-  }, [pinMqttTopics]);
+    customSensors.forEach(cs => {
+      if (activeSensors[cs.id] !== false) {
+        list.push({ id: cs.id, label: cs.name });
+      }
+    });
+    return list;
+  }, [activeSensors, customSensors]);
+
+  const handleIntervalChange = (sensorId: string, val: number) => {
+    const newVal = val || 5;
+    setDbSyncInterval(prev => {
+      const updated = { ...prev, [sensorId]: newVal };
+      localStorage.setItem('sf_edge_logger_sync_interval', JSON.stringify(updated));
+      supabase.from('app_settings').upsert({ key: `sf_edge_logger_config_${resolvedDeviceId}`, value: { syncInterval: updated } }).then();
+      return updated;
+    });
+  };
 
   // Raspberry Pi (Python) 코드 자동 생성 함수
   const handleGeneratePythonCode = async () => {
@@ -1596,6 +1648,7 @@ load_dotenv()
 # SUPABASE_KEY: Supabase Service Role Key (Be careful: keep it secret!)
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+DEVICE_ID = os.getenv("DEVICE_ID", "${resolvedDeviceId}")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("[Error] Supabase configuration is missing. Configure .env or edit the script.")
@@ -1609,7 +1662,7 @@ print("Agent is running and listening for remote commands from Dashboard...")
 
 while True:
     try:
-        response = supabase.table("app_settings").select("value").eq("key", "sf_logger_status").execute()
+        response = supabase.table("app_settings").select("value").eq("key", f"sf_logger_status_{DEVICE_ID}").execute()
         
         if response.data and len(response.data) > 0:
             settings = response.data[0].get("value", {})
@@ -1878,30 +1931,14 @@ while True:
               <p className="text-[10px] text-white/40 mt-4 text-right">Data provided by Open-Meteo API (No Key)</p>
             </div>
 
-            {/* Connection Information */}
+            {/* Global Infrastructure */}
             <div className="bg-white rounded-2xl p-6 shadow-[0_4px_20px_rgba(0,0,0,0.03)] border border-gray-100 flex flex-col justify-between space-y-4">
               <h3 className="text-lg font-bold text-primary flex items-center gap-2">
                 <span className="w-1.5 h-4 bg-secondary rounded-full"></span>
-                System Connection
+                Global Infrastructure
               </h3>
               
               <div className="space-y-3.5">
-                {/* WiFi SSID Card */}
-                <div className="flex justify-between items-center p-3.5 bg-light rounded-xl hover:bg-gray-200 transition-colors">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-secondary/10 flex items-center justify-center text-secondary">
-                      <i className="mdi mdi-wifi text-lg"></i>
-                    </div>
-                    <div>
-                      <span className="block text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Wi-Fi Network</span>
-                      <span className="text-sm font-bold text-primary">{wifiSsid || 'Not configured'}</span>
-                    </div>
-                  </div>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${wifiSsid ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>
-                    {wifiSsid ? 'Wired' : 'Offline'}
-                  </span>
-                </div>
-
                 {/* MQTT Broker Card */}
                 <div className="flex justify-between items-center p-3.5 bg-light rounded-xl hover:bg-gray-200 transition-colors">
                   <div className="flex items-center gap-2.5">
@@ -1942,117 +1979,24 @@ while True:
             </div>
           </div>
 
-          {/* Active Devices (Sensors and Actuators) */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
-            
-            {/* Active Sensors */}
-            <div className="bg-white rounded-2xl p-6 shadow-[0_4px_20px_rgba(0,0,0,0.03)] border border-gray-100">
-              <h3 className="text-lg font-bold text-primary mb-4 flex items-center gap-2">
-                <span className="w-1.5 h-4 bg-primary rounded-full"></span>
-                Active Sensors Grid
-              </h3>
-              
-              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
-                {/* Check default active sensors */}
-                {Object.entries({ 
-                  temperature: { label: 'Temperature', icon: 'mdi-thermometer' },
-                  humidity: { label: 'Humidity', icon: 'mdi-water-percent' },
-                  light: { label: 'Light Intensity', icon: 'mdi-white-balance-sunny' },
-                  co2: { label: 'Carbon Dioxide', icon: 'mdi-molecule-co2' },
-                  ph: { label: 'pH Sensor', icon: 'mdi-flask' },
-                  ec: { label: 'EC Sensor', icon: 'mdi-lightning-bolt' },
-                  do: { label: 'DO Sensor', icon: 'mdi-chart-bubble' }
-                }).map(([key, meta]) => {
-                  const isActive = activeSensors[key] !== false;
-                  if (!isActive) return null;
-                  return (
-                    <div key={key} className="relative flex flex-col items-center justify-center p-4 bg-light rounded-xl border border-gray-150 hover:bg-gray-200 transition-all text-center h-[105px] shadow-sm">
-                      <i className={`mdi ${meta.icon} text-3xl text-secondary mb-2`}></i>
-                      <span className="text-[11px] font-bold text-gray-700 leading-tight">{meta.label}</span>
-                    </div>
-                  );
-                })}
-
-                {/* Check custom active sensors */}
-                {customSensors.map((sensor) => {
-                  const isActive = activeSensors[sensor.id] !== false;
-                  if (!isActive) return null;
-                  return (
-                    <div key={sensor.id} className="relative flex flex-col items-center justify-center p-4 bg-light rounded-xl border border-gray-150 hover:bg-gray-200 transition-all text-center h-[105px] shadow-sm">
-                      <span className="absolute top-2 left-2 text-[8px] font-extrabold bg-info/15 text-info px-1.5 py-0.5 rounded uppercase tracking-wide">Custom</span>
-                      <i className="mdi mdi-cube text-3xl text-secondary mb-2 animate-pulse"></i>
-                      <span className="text-[11px] font-bold text-gray-700 leading-tight">{sensor.name}</span>
-                    </div>
-                  );
-                })}
-
-                {/* If none */}
-                {Object.keys(activeSensors).filter(key => activeSensors[key] !== false).length === 0 && customSensors.filter(s => activeSensors[s.id] !== false).length === 0 && (
-                  <p className="text-xs text-gray-400 font-medium py-2 col-span-full text-center">No sensors are currently active.</p>
-                )}
+          {/* Facility Overview Cards */}
+          <div className="mt-8 space-y-8">
+            {facilities.map((facility) => (
+              <FacilityOverviewCard 
+                key={facility.device_id}
+                deviceId={facility.device_id} 
+                facilityName={facility.description || facility.device_id}
+                showNotification={showNotification}
+                SENSOR_METADATA={SENSOR_METADATA}
+                crops={facility.crops || []}
+              />
+            ))}
+            {facilities.length === 0 && (
+              <div className="text-center py-12 text-gray-500 bg-white rounded-2xl border border-gray-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)]">
+                <p>No facilities configured.</p>
+                <button onClick={() => router.push('?tab=facilities')} className="mt-4 text-primary font-semibold underline">Go to Settings to add one</button>
               </div>
-            </div>
-
-            {/* Active Equipment */}
-            <div className="bg-white rounded-2xl p-6 shadow-[0_4px_20px_rgba(0,0,0,0.03)] border border-gray-100">
-              <h3 className="text-lg font-bold text-primary mb-4 flex items-center gap-2">
-                <span className="w-1.5 h-4 bg-primary rounded-full"></span>
-                Active Actuators Grid
-              </h3>
-              
-              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
-                {/* Check default equipment */}
-                {Object.entries({
-                  circulationFan: { label: 'Circulation Fan', icon: 'mdi-fan' },
-                  growLight: { label: 'Grow Light', icon: 'mdi-lightbulb-on' },
-                  hvac: { label: 'HVAC', icon: 'mdi-air-conditioner' },
-                  humidifier: { label: 'Humidifier', icon: 'mdi-air-humidifier' },
-                  co2Generator: { label: 'CO2 Generator', icon: 'mdi-gas-cylinder' },
-                  waterPump: { label: 'Water Pump', icon: 'mdi-water-pump' },
-                  solenoidValve: { label: 'Solenoid Valve', icon: 'mdi-pipe-valve' },
-                  dosingPump: { label: 'Dosing Pump', icon: 'mdi-eyedropper' },
-                  airPump: { label: 'Air Pump', icon: 'mdi-weather-windy' }
-                }).map(([key, meta]) => {
-                  const isActive = activeEquipment[key] !== false;
-                  if (!isActive) return null;
-                  const isRunning = equipment[key as keyof typeof equipment] === true;
-                  return (
-                    <div key={key} className="relative flex flex-col items-center justify-center p-4 bg-light rounded-xl border border-gray-150 hover:bg-gray-200 transition-all text-center h-[105px] shadow-sm">
-                      <div className="absolute top-2 right-2 flex items-center gap-1">
-                        <span className={`w-1.5 h-1.5 rounded-full ${isRunning ? 'bg-success animate-pulse' : 'bg-gray-400'}`}></span>
-                        <span className={`text-[8px] font-bold uppercase tracking-wider ${isRunning ? 'text-success' : 'text-gray-400'}`}>
-                          {isRunning ? 'Run' : 'Off'}
-                        </span>
-                      </div>
-                      <i className={`mdi ${meta.icon} text-3xl text-secondary mb-2 ${isRunning ? 'animate-spin' : ''}`} style={{ animationDuration: '4s' }}></i>
-                      <span className="text-[11px] font-bold text-gray-700 leading-tight">{meta.label}</span>
-                    </div>
-                  );
-                })}
-
-                {/* Check custom equipment */}
-                {customEquipments.map((eq) => {
-                  const isActive = activeEquipment[eq.id] !== false;
-                  if (!isActive) return null;
-                  const isRunning = customEquipmentStates[eq.id] === true;
-                  return (
-                    <div key={eq.id} className="relative flex flex-col items-center justify-center p-4 bg-light rounded-xl border border-gray-150 hover:bg-gray-200 transition-all text-center h-[105px] shadow-sm">
-                      <span className="absolute top-2 left-2 text-[8px] font-extrabold bg-info/15 text-info px-1.5 py-0.5 rounded uppercase tracking-wide">Custom</span>
-                      <div className="absolute top-2 right-2 flex items-center gap-1">
-                        <span className={`w-1.5 h-1.5 rounded-full ${isRunning ? 'bg-success animate-pulse' : 'bg-gray-400'}`}></span>
-                      </div>
-                      <i className={`mdi mdi-expansion-port text-3xl text-secondary mb-2 ${isRunning ? 'animate-bounce' : ''}`}></i>
-                      <span className="text-[11px] font-bold text-gray-700 leading-tight">{eq.name}</span>
-                    </div>
-                  );
-                })}
-
-                {/* If none */}
-                {Object.keys(activeEquipment).filter(key => activeEquipment[key] !== false).length === 0 && customEquipments.filter(e => activeEquipment[e.id] !== false).length === 0 && (
-                  <p className="text-xs text-gray-400 font-medium py-2 col-span-full text-center">No equipment is currently active.</p>
-                )}
-              </div>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -2928,7 +2872,6 @@ while True:
                       <th className="p-4 font-semibold w-[120px]">Pin</th>
                       <th className="p-4 font-semibold w-[25%]">Function Description</th>
                       <th className="p-4 font-semibold w-[20%]">Sensors & Equipments</th>
-                      <th className="p-4 font-semibold w-[20%]">MQTT Topic</th>
                       <th className="p-4 font-semibold">Connected Device(s)</th>
                     </tr>
                   </thead>
@@ -2959,13 +2902,6 @@ while True:
                               )}
                               <td className="p-4 align-top">
                                 <MultiSelectDropdown options={mappingOptions} selected={pinMappings[pin.id]?.[i] || ['none']} onChange={(vals) => handlePinMappingChange(pin.id, i, vals)} />
-                              </td>
-                              <td className="p-4 align-top">
-                                <div className="flex flex-col gap-1 w-full bg-gray-50/50 p-1.5 rounded-lg border border-gray-100">
-                                  {(pinMappings[pin.id]?.[i] || ['none']).map((mapping, tIdx) => (
-                                    <input key={tIdx} type="text" placeholder={topicPlaceholder} value={pinMqttTopics[pin.id]?.[i]?.[tIdx] || ''} onChange={(e) => handlePinMqttTopicChange(pin.id, i, tIdx, e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:border-secondary focus:ring-1 focus:ring-secondary outline-none text-xs transition-all bg-white" />
-                                  ))}
-                                </div>
                               </td>
                               <td className="p-4 align-top">
                                 <div className="flex items-center gap-2">
@@ -3065,21 +3001,21 @@ while True:
               </p>
               
               <div className="mb-6 bg-gray-50 p-4 rounded-lg border border-gray-200">
-                <label className="block text-sm font-medium text-gray-700 mb-3">DB Transmission Interval (Per Topic)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3">DB Transmission Interval (Per Sensor)</label>
                 
-                {activeMqttTopics.length === 0 ? (
-                  <p className="text-sm text-gray-500 italic py-2">No MQTT topics configured in Hardware Pin Setup.</p>
+                {activeSensorsList.length === 0 ? (
+                  <p className="text-sm text-gray-500 italic py-2">No active sensors for this facility.</p>
                 ) : (
                   <div className="space-y-2 mb-3 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
-                    {activeMqttTopics.map(topic => (
-                      <div key={topic} className="flex justify-between items-center bg-white p-2.5 border border-gray-200 rounded-md shadow-sm">
-                        <span className="text-sm font-mono text-gray-600 truncate mr-3 flex-1" title={topic}>{topic}</span>
+                    {activeSensorsList.map(sensor => (
+                      <div key={sensor.id} className="flex justify-between items-center bg-white p-2.5 border border-gray-200 rounded-md shadow-sm">
+                        <span className="text-sm font-mono text-gray-600 truncate mr-3 flex-1" title={sensor.id}>{sensor.label} <span className="text-xs text-gray-400 font-sans ml-2">({sensor.id})</span></span>
                         <div className="flex gap-2 items-center shrink-0">
                           <input 
                             type="number" 
                             min="1" 
-                            value={dbSyncInterval[topic] || 5} 
-                            onChange={e => setDbSyncInterval(prev => ({ ...prev, [topic]: parseInt(e.target.value) || 5 }))} 
+                            value={dbSyncInterval[sensor.id] || 5} 
+                            onChange={e => handleIntervalChange(sensor.id, parseInt(e.target.value))} 
                             className="w-16 p-1 text-center border border-gray-300 rounded focus:border-primary outline-none text-sm" 
                           />
                           <span className="text-xs text-gray-500 font-medium">mins</span>
@@ -3089,7 +3025,7 @@ while True:
                   </div>
                 )}
                 
-                <p className="text-xs text-gray-500 mt-2">The logger will independently calculate the average for each MQTT topic over its defined period and send it to the database.</p>
+                <p className="text-xs text-gray-500 mt-2">The logger will independently calculate the average for each sensor over its defined period and send it to the database.</p>
               </div>
 
               <div className="flex justify-start">

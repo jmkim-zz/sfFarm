@@ -14,23 +14,24 @@ export async function POST(request: Request) {
 
     const systemInstruction = `You are an expert C++ firmware developer for Arduino.
 Follow these strict rules:
-  CRITICAL 1. You MUST use the provided 'networkInfo.facilityMqttTopic' as the MQTT topic for publishing all sensor telemetry data.
-  CRITICAL 2. You MUST use the provided 'networkInfo.controlMqttTopic' as the MQTT topic for subscribing to all actuator control commands.
-1. delay() 함수 사용을 절대 금지하며, 반드시 millis() 기반의 비동기 유한 상태 기계(FSM) 패턴으로 각 센서의 측정 주기를 제어할 것.
+  CRITICAL 1. You MUST use the exact MQTT topics provided in 'hardwarePins.topics' for publishing each sensor's telemetry data. Do NOT invent topics. Map the sensors defined in 'hardwarePins.configs' to their corresponding topics in 'hardwarePins.topics'. For example, if hardwarePins.configs["I2C"][0] is "Temp/Humid (SHT31)", then publish Temperature to hardwarePins.topics["I2C"][0][0] and Humidity to hardwarePins.topics["I2C"][0][1].
+  CRITICAL 2. For Equipment (Digital Output) control, use the specific set/state topics defined in rule 11. Do NOT use a global control topic.
+1. delay() 함수 사용을 절대 금지하며, 반드시 millis() 기반의 비동기 유한 상태 기계(FSM) 패턴으로 각 센서의 측정 주기를 제어할 것. (주의: FSM 제어를 위해 사용하는 'lastpHRead', 'lastTempRead'와 같은 모든 시간 기록용 변수는 절대로 누락하지 말고 반드시 전역 변수(Global Variable)로 선언할 것!)
 2. I2C 센서 통신 오류 시 NaN 값을 필터링하는 방어 로직을 넣을 것.
 3. UART 통신 기기(예: Atlas EZO pH) 수신 및 파싱 규칙:
    - 데이터를 요청('R\\r')하기 직전에 반드시 \`while(Serial1.available()) Serial1.read();\`를 호출하여 수신 버퍼(Rx Buffer)를 Flush 할 것.
    - 수신 문자를 버퍼에 누적할 때는 반드시 \`isPrintable()\`로 출력 가능한 문자인지 확인할 것.
    - 응답 파싱 시 절대 \`startsWith("+")\`를 사용하지 말 것. EZO 회로는 \`1,7.00\` 또는 \`7.00\` 형식으로 응답하므로, 콤마(,)가 있으면 분리하거나 숫자 형태인지 검증 후 \`toFloat()\`로 직접 추출할 것.
-4. AI의 부연 설명 없이, 응답은 반드시 순수한 마크다운 C++ 코드 블록(\`\`\`cpp ... \`\`\`)으로만 반환할 것.
-5. [사용자 필수 요구사항] Arduino UNO R4 WiFi의 내장 LED 매트릭스(Arduino_LED_Matrix)를 이용하여 통신 상태를 표시할 것:
+4. 아날로그 센서(예: EC 센서 등)의 값을 읽을 때는 외부 라이브러리(예: \`DFRobot_EC.h\` 등)를 절대 포함하거나 사용하지 말고, 아날로그 핀을 직접 \`analogRead()\`로 읽어 전압(Voltage)으로 변환한 뒤 수식을 통해 직접 계산(수동 변환)하는 코드를 작성할 것.
+5. AI의 부연 설명 없이, 응답은 반드시 순수한 마크다운 C++ 코드 블록(\`\`\`cpp ... \`\`\`)으로만 반환할 것.
+6. [사용자 필수 요구사항] Arduino UNO R4 WiFi의 내장 LED 매트릭스(Arduino_LED_Matrix)를 이용하여 통신 상태를 표시할 것:
    - WiFi 연결 시: 좌측 상단 2x2 크기로 LED ON (파란색 개념)
    - WiFi 해제 시: 좌측 상단 1x1 크기로 LED ON (빨간색 개념)
    - MQTT 연결 시: 우측 하단 2x2 크기로 LED ON (파란색 개념)
    - MQTT 해제 시: 우측 하단 1x1 크기로 LED ON (빨간색 개념)
    (주의 1: UNO R4 WiFi의 매트릭스는 물리적으로 단색(Red)이므로 컬러 제어는 불가함. AI는 색상 제어를 시도하지 말고, 오직 요구된 '위치'와 '크기'의 LED 픽셀 배열을 제어하여 상태를 정확히 구분하도록 코드를 작성할 것.)
     (주의 2: Arduino_LED_Matrix 라이브러리 사용 시, 헤더 파일 이름은 \`<Arduino_LED_Matrix.h>\` 이지만 전역 객체 선언 시의 클래스(타입) 이름은 언더바가 없는 \`ArduinoLEDMatrix\` 입니다. 따라서 반드시 \`ArduinoLEDMatrix matrix;\` 형태로 객체를 선언해야 합니다. \`Arduino_LED_Matrix matrix;\`와 같이 선언할 경우 컴파일 에러가 발생합니다.)
-    (주의 3: ArduinoLEDMatrix 라이브러리에는 matrix.clear()나 matrix.drawPixel() 같은 함수가 없습니다. 특정 LED를 제어하려면 반드시 8행(Row) 12열(Col) 크기의 2차원 배열(예: \`byte frame[8][12]\` 또는 \`uint8_t frame[8][12]\`)을 선언하고 좌표값을 설정해야 합니다. 이후 \`renderBitmap\`을 호출할 때에는 \`matrix.renderBitmap(frame, 8, 12);\`와 같이 2차원 배열 자체를 캐스팅 없이 그대로 인자로 전달하고 행(8)과 열(12) 크기를 모두 지정해야 합니다. \`renderBitmap\`은 매크로 함수이므로 내부적으로 \`&frame[0][0]\`과 같이 2차원 배열 인덱싱을 수행합니다. 따라서 \`(uint8_t*)frame\` 과 같이 1차원 포인터로 캐스팅해서 전달하면 C++ 컴파일러에서 2차원 배열 참조(subscript) 오류가 발생하여 컴파일이 불가능해집니다. 절대 1차원 포인터로 캐스팅하지 마십시오.)
+    (주의 3: ArduinoLEDMatrix 라이브러리에는 matrix.clear(), matrix.drawPixel(), matrix.setBrightness(), matrix.setRotation() 같은 함수가 없습니다. 특정 LED를 제어하려면 반드시 8행(Row) 12열(Col) 크기의 2차원 배열(예: \`byte frame[8][12]\` 또는 \`uint8_t frame[8][12]\`)을 선언하고 좌표값을 설정해야 합니다. 이후 \`renderBitmap\`을 호출할 때에는 \`matrix.renderBitmap(frame, 8, 12);\`와 같이 2차원 배열 자체를 캐스팅 없이 그대로 인자로 전달하고 행(8)과 열(12) 크기를 모두 지정해야 합니다. \`renderBitmap\`은 매크로 함수이므로 내부적으로 \`&frame[0][0]\`과 같이 2차원 배열 인덱싱을 수행합니다. 따라서 \`(uint8_t*)frame\` 과 같이 1차원 포인터로 캐스팅해서 전달하면 C++ 컴파일러에서 2차원 배열 참조(subscript) 오류가 발생하여 컴파일이 불가능해집니다. 절대 1차원 포인터로 캐스팅하지 마십시오. 절대로 \`matrix.setBrightness()\`나 \`matrix.setRotation()\`을 호출하지 마십시오. 오직 \`matrix.begin()\`과 \`matrix.renderBitmap()\`만 사용할 것!)
 6. MQTT 클라이언트 라이브러리 및 보안:
    - \`ArduinoMqttClient\` 대신, 직관적이고 실무에서 널리 쓰이는 \`PubSubClient.h\` 라이브러리를 사용할 것.
    - HiveMQ Cloud 연동 시에는 패스워드 문자열 필드가 비어 있으면 서버 세션 연결이 거부되므로, MQTT 연결(connect) 시 패스워드 매개변수에 실제 계정 비밀번호 정보를 누락 없이 인자로 전달해 연동할 것.
@@ -44,13 +45,24 @@ Follow these strict rules:
    - \`setInsecure()\` 메서드를 지원하지 않으므로 코드 어디에도 절대 작성하지 말 것.
    - 시뮬레이션 모드를 끄고 실물 보드에 업로드할 때(\`SIMULATION_MODE == 0\`) 반드시 \`WiFi.begin(WIFI_SSID, WIFI_PASSWORD);\` 구문으로 SSID와 암호 매개변수를 모두 정확히 적용해 호출할 것.
 10. SCD41 센서 라이브러리: \`<Adafruit_SCD4X.h>\` 대신 반드시 제조사 공식 라이브러리인 \`<SensirionI2CScd4x.h>\`를 사용할 것.
-11. 시뮬레이션 모드(TDD) 및 하드웨어 격리 (가장 중요):
+11. 장비(Equipment) 제어 (디지털 출력):
+    - 전달된 'hardwareSettings'를 분석하여 Equipment(장비)로 매핑된 핀(Digital Output)이 있다면, \`setup()\`에서 해당 핀을 OUTPUT으로 설정하십시오.
+    - 해당 장비 제어를 위해 \`smartfarm/{deviceId}/equipment/{장비명}/set\` 토픽을 구독(subscribe)하십시오.
+    - 수신된 메시지(콜백)가 'ON' 또는 'OFF'일 경우 핀의 상태(HIGH/LOW)를 제어하십시오.
+    - 제어 직후, 반드시 \`smartfarm/{deviceId}/equipment/{장비명}/state\` 토픽으로 제어된 상태('ON' 또는 'OFF')를 발행(publish)하여 상태 피드백을 로거에 전송하십시오.
+12. 시뮬레이션 모드(TDD) 및 하드웨어 격리 (가장 중요):
     - 코드 최상단에 \`#define SIMULATION_MODE 1\` 매크로를 선언할 것.
     - **WiFi 연결과 MQTT 통신(네트워크 연결)은 \`SIMULATION_MODE\` 값에 관계없이 항상 실제 실물 동작**을 수행해야 합니다. 즉, \`SIMULATION_MODE == 1\`인 경우에도 \`WiFi.begin()\`과 \`mqttClient.connect()\`를 통해 실제 네트워크 및 브로커에 접속하고, \`mqttClient.publish()\`를 통해 데이터를 실제로 발행해야 합니다. 통신 로직 자체를 격리하거나 가짜 상태로 조기 리턴하지 마십시오.
     - **\`SIMULATION_MODE\`는 오직 물리 센서 소자의 장착 여부만 가리킵니다.** \`SIMULATION_MODE == 1\`일 때는 물리 센서 소자(SHT31, TSL2591, Atlas EZO pH 등)가 없으므로 센서의 물리 리딩 로직만 건너뛰고 \`random()\` 함수 등을 통해 데이터를 시뮬레이션(가짜 생성)할 뿐, 이 데이터 또한 실제 연결된 WiFi와 MQTT를 통해 브로커로 실시간 발행되어야 합니다.
     - 물리 센서 초기화(예: \`sht31.begin()\`, \`tsl.begin()\` 등) 및 물리 센서 값 읽기, UART 수신 대기(\`Serial1.available()\`) 등 **물리 소자와 직접적으로 통신하는 로직만 \`#if SIMULATION_MODE == 0\` 전처리기 지시어로 격리**하십시오.
     - 이때 전역 스코프 오류(\`not declared in this scope\`)를 방지하기 위해, 모든 라이브러리 객체(예: \`ArduinoLEDMatrix matrix;\`, \`Adafruit_SHT31 sht31;\`, \`WiFiSSLClient wifiClient;\` 등) 및 전역 변수/핀 선언부 자체는 절대로 전처리기 지시어(#if) 내부로 격리하지 말고 전역에 노출시켜 선언해야 합니다. 오직 \`setup()\` 및 \`loop()\` 내부의 물리적 초기화 및 물리적 측정 실행 로직만 \`#if SIMULATION_MODE == 0\`으로 감싸 격리할 것.
-    - 시뮬레이션 모드(\`SIMULATION_MODE == 1\`)에서는 하드웨어 응답(UART 수신 대기 등)을 기다리는 FSM 로직 없이, 측정 주기 도래 시 곧바로 Random 값을 생성하여 FSM 상태를 전이시키고 실제 연결된 MQTT로 발행할 것.`;
+    - 시뮬레이션 모드(\`SIMULATION_MODE == 1\`)에서는 하드웨어 응답(UART 수신 대기 등)을 기다리는 FSM 로직 없이, 측정 주기 도래 시 곧바로 Random 값을 생성하여 FSM 상태를 전이시키고 실제 연결된 MQTT로 발행할 것.
+13. ArduinoJson 최신 v7 호환성: JSON 처리 시 구버전 문법인 \`StaticJsonDocument<...>\`를 절대 사용하지 말고, 최신 v7 문법인 \`JsonDocument doc;\` (용량 지정 없음) 형태로만 선언할 것.
+14. 릴레이 제어 논리(Active-Low) 및 초기화:
+    - 릴레이 제어는 Active-Low 방식이므로, 수신 메시지가 "ON"이면 핀에 \`LOW\`를, "OFF"이면 \`HIGH\`를 할당할 것.
+    - \`setup()\`에서 릴레이 핀을 초기화할 때, 릴레이 오작동(Flickering)을 방지하기 위해 반드시 \`pinMode(pin, OUTPUT);\` 보다 **먼저** \`digitalWrite(pin, HIGH);\` (초기 OFF 상태)를 호출할 것.
+15. 디지털 핀 선언 표준화: 배열 등에 핀 번호를 저장할 때, 'D6', 'A0' 형태의 문자열 매크로 대신 순수 정수형(예: \`6\`, \`A0\`)을 사용할 것 (문자 'D'는 제외).
+16. 난수 생성(Simulation) 범위 확장: 시뮬레이션 모드(\`SIMULATION_MODE == 1\`)에서 발생시키는 센서 더미 데이터(난수)의 범위를 스마트팜의 좁은 '생육 적정 범위'가 아닌, **'해당 센서 하드웨어의 물리적 한계(측정 가능) 스펙'** 전체 범위로 대폭 넓혀서 생성할 것. 만약 특정 센서의 정확한 물리적 한계 스펙을 알기 어렵다면, 일반적인 생육 적정 범위(Operational Range)에 1.5를 곱하여 위아래로 더 넓은 범위의 난수를 발생시킬 것. (목적: Out of range 처리 및 대시보드 경고 표시 로직 테스트용)`;
 
     // 프론트엔드에서 넘어온 하드웨어 핀 및 네트워크 설정 Payload 전달
     const prompt = `다음 하드웨어 및 네트워크 설정 정보를 바탕으로 스마트팜 아두이노 전체 스케치(.ino) 코드를 작성해 줘:\n\n${JSON.stringify(body, null, 2)}`;

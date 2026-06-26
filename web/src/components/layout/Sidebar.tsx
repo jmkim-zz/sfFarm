@@ -7,9 +7,52 @@ import { Tractor, Gauge, Cpu, Settings2, Wrench, FileText, Settings, Users, Serv
 import { supabase } from '../../lib/supabase';
 
 // Crop Icons Mapping (Exported for use in Facilities Setting page)
+export const CROP_CATEGORIES = [
+  {
+    category: '과채류 (Fruit Vegetables)',
+    items: [
+      { name: '토마토', icon: '🍅' }, { name: '방울토마토', icon: '🍒' }, { name: '오이', icon: '🥒' },
+      { name: '파프리카', icon: '🫑' }, { name: '고추', icon: '🌶️' }, { name: '가지', icon: '🍆' },
+      { name: '호박', icon: '🎃' }, { name: '옥수수', icon: '🌽' }, { name: '완두콩', icon: '🫛' }, { name: '버섯', icon: '🍄' }
+    ]
+  },
+  {
+    category: '엽채류 (Leafy Vegetables)',
+    items: [
+      { name: '상추', icon: '🥬' }, { name: '브로콜리', icon: '🥦' }, { name: '대파', icon: '🧅' },
+      { name: '마늘', icon: '🧄' }, { name: '샐러리', icon: '🥬' }, { name: '시금치', icon: '🌿' },
+      { name: '아스파라거스', icon: '🎋' }, { name: '잎사귀', icon: '🍃' }, { name: '클로버', icon: '☘️' }, { name: '새싹', icon: '🌱' }
+    ]
+  },
+  {
+    category: '과일류 (Fruits)',
+    items: [
+      { name: '딸기', icon: '🍓' }, { name: '블루베리', icon: '🫐' }, { name: '사과', icon: '🍎' },
+      { name: '포도', icon: '🍇' }, { name: '멜론', icon: '🍈' }, { name: '수박', icon: '🍉' },
+      { name: '복숭아', icon: '🍑' }, { name: '오렌지', icon: '🍊' }, { name: '레몬', icon: '🍋' }, { name: '바나나', icon: '🍌' }
+    ]
+  },
+  {
+    category: '뿌리채소 (Root Vegetables)',
+    items: [
+      { name: '당근', icon: '🥕' }, { name: '감자', icon: '🥔' }, { name: '고구마', icon: '🍠' },
+      { name: '무', icon: '🍠' }, { name: '땅콩', icon: '🥜' }, { name: '생강', icon: '🫚' },
+      { name: '비트', icon: '🧅' }, { name: '연근', icon: '🪷' }, { name: '우엉', icon: '🪵' }, { name: '인삼', icon: '🌱' }
+    ]
+  },
+  {
+    category: '허브 및 특용 (Herbs/Specialty)',
+    items: [
+      { name: '바질', icon: '🌿' }, { name: '민트', icon: '🍃' }, { name: '로즈마리', icon: '🌲' },
+      { name: '찻잎', icon: '🍵' }, { name: '라벤더', icon: '🪻' }, { name: '올리브', icon: '🫒' },
+      { name: '해바라기', icon: '🌻' }, { name: '참깨', icon: '🌾' }, { name: '커피콩', icon: '🫘' }, { name: '꽃', icon: '🌸' }
+    ]
+  }
+];
+
 export const CROP_ICONS: Record<string, string> = {
   '오이': '🥒', '토마토': '🍅', '고추': '🌶️', '파프리카': '🫑', '딸기': '🍓', 
-  '방울토마토': '🍒', '엽채류': '🥬', '상추': '🥗', '멜론': '🍈', '블루베리': '🫐'
+  '방울토마토': '🍒', '엽채류': '🥬', '상추': '🥬', '멜론': '🍈', '블루베리': '🫐'
 };
 
 export default function Sidebar() {

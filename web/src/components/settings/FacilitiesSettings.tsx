@@ -3,6 +3,13 @@ import { supabase } from '../../lib/supabase/client';
 import { Save, Plus, Trash2, Edit2, Tractor, CheckCircle, XCircle, Settings, Cpu, Settings2, Wifi, Server, CircuitBoard } from 'lucide-react';
 import { CROP_ICONS } from '../layout/Sidebar';
 import Link from 'next/link';
+import EmojiIcon from '../ui/EmojiIcon';
+import CropIconPickerModal from './CropIconPickerModal';
+
+export interface CropItem {
+  name: string;
+  icon: string;
+}
 
 interface Facility {
   id?: string;
@@ -10,10 +17,8 @@ interface Facility {
   mqtt_topic: string;
   description: string;
   is_active: boolean;
-  crops: string[];
+  crops: any[];
 }
-
-const PREDEFINED_CROPS = ['오이', '토마토', '고추', '파프리카', '딸기', '방울토마토', '엽채류', '상추', '멜론', '블루베리'];
 
 const DEFAULT_SENSORS = [
   { id: 'temperature', label: 'Temperature' },
@@ -41,8 +46,8 @@ export default function FacilitiesSettings({ showNotification, onFacilitiesChang
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<Facility | null>(null);
-  const [customCrop, setCustomCrop] = useState('');
+  const [editForm, setEditForm] = useState<Partial<Facility> | null>(null);
+  const [isCropModalOpen, setIsCropModalOpen] = useState(false);
   
   // App Settings States
   const [wifiConfig, setWifiConfig] = useState({ ssid: '', password: '' });
@@ -170,28 +175,21 @@ export default function FacilitiesSettings({ showNotification, onFacilitiesChang
     }
   };
 
-  const toggleCrop = (crop: string) => {
+  const handleAddCrop = (cropData: { name: string; icon: string }) => {
     if (!editForm) return;
     const currentCrops = editForm.crops || [];
-    if (currentCrops.includes(crop)) {
-      setEditForm({ ...editForm, crops: currentCrops.filter(c => c !== crop) });
-    } else {
-      setEditForm({ ...editForm, crops: [...currentCrops, crop] });
+    const exists = currentCrops.some(c => (typeof c === 'string' ? c : c.name) === cropData.name);
+    if (!exists) {
+      setEditForm({ ...editForm, crops: [...currentCrops, cropData] });
     }
   };
 
-  const addCustomCrop = () => {
-    if (!editForm || !customCrop.trim()) return;
-    const cropName = customCrop.trim();
-    if (!editForm.crops?.includes(cropName)) {
-      setEditForm({ ...editForm, crops: [...(editForm.crops || []), cropName] });
-    }
-    setCustomCrop('');
-  };
-
-  const removeCrop = (crop: string) => {
+  const removeCrop = (cropName: string) => {
     if (!editForm) return;
-    setEditForm({ ...editForm, crops: (editForm.crops || []).filter(c => c !== crop) });
+    setEditForm({ 
+      ...editForm, 
+      crops: (editForm.crops || []).filter(c => (typeof c === 'string' ? c : c.name) !== cropName) 
+    });
   };
 
   return (
@@ -246,11 +244,15 @@ export default function FacilitiesSettings({ showNotification, onFacilitiesChang
                     <td className="p-3 text-sm text-gray-600 font-mono bg-gray-100/50 rounded">{facility.device_id}</td>
                     <td className="p-3">
                       <div className="flex flex-wrap gap-1.5">
-                        {(facility.crops || []).map((crop, idx) => (
-                          <span key={idx} className="text-xs bg-green-50 text-green-700 px-2 py-1 rounded-full border border-green-200 flex items-center gap-1">
-                            <span>{CROP_ICONS[crop] || '🌱'}</span> {crop}
-                          </span>
-                        ))}
+                        {(facility.crops || []).map((crop, idx) => {
+                          const name = typeof crop === 'string' ? crop : crop.name;
+                          const icon = typeof crop === 'string' ? CROP_ICONS[crop] || '🌱' : crop.icon;
+                          return (
+                            <span key={idx} className="text-xs bg-green-50 text-green-700 px-2 py-1 rounded-full border border-green-200 flex items-center gap-1">
+                              <span><EmojiIcon emoji={icon} size={14} /></span> {name}
+                            </span>
+                          );
+                        })}
                         {(!facility.crops || facility.crops.length === 0) && <span className="text-xs text-gray-400">설정 안됨</span>}
                       </div>
                     </td>
@@ -359,43 +361,26 @@ export default function FacilitiesSettings({ showNotification, onFacilitiesChang
                     {(editForm.crops || []).length === 0 ? (
                       <span className="text-sm text-gray-400">선택된 작물이 없습니다.</span>
                     ) : (
-                      (editForm.crops || []).map((crop, idx) => (
-                        <div key={idx} className="bg-secondary/10 text-secondary-dark px-3 py-1.5 rounded-full border border-secondary/20 flex items-center gap-2 text-sm font-medium shadow-sm">
-                          <span>{CROP_ICONS[crop] || '🌱'}</span>
-                          <span>{crop}</span>
-                          <button onClick={() => removeCrop(crop)} className="text-secondary hover:text-red-500 transition-colors bg-white rounded-full p-0.5"><XCircle size={14} /></button>
-                        </div>
-                      ))
+                      (editForm.crops || []).map((crop, idx) => {
+                        const name = typeof crop === 'string' ? crop : crop.name;
+                        const icon = typeof crop === 'string' ? CROP_ICONS[crop] || '🌱' : crop.icon;
+                        return (
+                          <div key={idx} className="bg-secondary/10 text-secondary-dark px-3 py-1.5 rounded-full border border-secondary/20 flex items-center gap-2 text-sm font-medium shadow-sm">
+                            <span className="flex items-center"><EmojiIcon emoji={icon} size={16} /></span>
+                            <span>{name}</span>
+                            <button onClick={() => removeCrop(name)} className="text-secondary hover:text-red-500 transition-colors bg-white rounded-full p-0.5"><XCircle size={14} /></button>
+                          </div>
+                        );
+                      })
                     )}
                   </div>
                   <div className="mb-4">
-                    <div className="flex flex-wrap gap-2">
-                      {PREDEFINED_CROPS.map(crop => {
-                        const isSelected = (editForm.crops || []).includes(crop);
-                        return (
-                          <button 
-                            key={crop}
-                            onClick={() => toggleCrop(crop)}
-                            className={`px-3 py-1.5 rounded-full text-sm flex items-center gap-1.5 transition-all border
-                              ${isSelected ? 'bg-secondary text-white border-secondary shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:border-secondary/50'}
-                            `}
-                          >
-                            <span>{CROP_ICONS[crop]}</span> {crop}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  <div className="flex gap-2 w-full md:w-1/2">
-                    <input 
-                      type="text" 
-                      value={customCrop}
-                      onChange={e => setCustomCrop(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && addCustomCrop()}
-                      placeholder="목록에 없는 작물 직접 입력..."
-                      className="flex-1 p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-secondary/50 outline-none"
-                    />
-                    <button onClick={addCustomCrop} className="px-4 py-2 bg-gray-800 text-white text-sm rounded-lg hover:bg-gray-700 transition-colors">추가</button>
+                    <button 
+                      onClick={() => setIsCropModalOpen(true)} 
+                      className="flex items-center gap-2 px-4 py-2 bg-gray-800 text-white text-sm rounded-lg hover:bg-gray-700 transition-colors"
+                    >
+                      <Plus size={16} /> 추가할 작물 선택하기
+                    </button>
                   </div>
                 </div>
 
@@ -486,6 +471,12 @@ export default function FacilitiesSettings({ showNotification, onFacilitiesChang
           </div>
         )}
       </div>
+
+      <CropIconPickerModal 
+        isOpen={isCropModalOpen}
+        onClose={() => setIsCropModalOpen(false)}
+        onSelect={handleAddCrop}
+      />
     </div>
   );
 }

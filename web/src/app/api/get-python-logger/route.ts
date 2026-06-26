@@ -19,10 +19,10 @@ export async function GET(request: Request) {
     const filePath = path.join(process.cwd(), '..', 'raspberry', 'data-logger.py');
     let pythonCode = await fs.readFile(filePath, 'utf-8');
 
-    // 토픽별 개별 전송 주기(intervalMap) 값을 스크립트 상단에 주입/치환
+    // 센서별 개별 전송 주기(intervalMap) 값을 스크립트 상단에 주입/치환
     pythonCode = pythonCode.replace(
-      'TOPIC_SYNC_INTERVALS = {} # Injected by Web UI',
-      `TOPIC_SYNC_INTERVALS = ${JSON.stringify(intervalMap)} # Injected from Dashboard UI`
+      'SENSOR_SYNC_INTERVALS = {} # Injected by Web UI',
+      `SENSOR_SYNC_INTERVALS = ${JSON.stringify(intervalMap)} # Injected from Dashboard UI`
     );
 
     return NextResponse.json({ code: pythonCode });

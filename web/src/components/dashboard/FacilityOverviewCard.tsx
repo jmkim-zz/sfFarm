@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useSupabaseSensors, useSystemSettings, useEquipmentControl } from '../../app/dashboard/DashboardClient';
+import { CROP_ICONS } from '../layout/Sidebar';
+import EmojiIcon from '../ui/EmojiIcon';
 
-export default function FacilityOverviewCard({ deviceId, facilityName, showNotification, SENSOR_METADATA }: any) {
+export default function FacilityOverviewCard({ deviceId, facilityName, showNotification, SENSOR_METADATA, crops = [] }: any) {
   const sensors = useSupabaseSensors(deviceId);
   const { activeSensors, activeEquipment } = useSystemSettings(deviceId);
   const { equipment, customEquipmentStates, setCustomEquipmentStates, toggleEquipment } = useEquipmentControl(deviceId, showNotification);
@@ -88,7 +90,17 @@ export default function FacilityOverviewCard({ deviceId, facilityName, showNotif
 
   return (
     <div className="mt-8 space-y-6">
-      <h2 className="text-2xl font-bold text-gray-800 border-b pb-2">{facilityName}</h2>
+      <h2 className="text-2xl font-bold text-gray-800 border-b pb-2 flex items-center gap-2">
+        {facilityName}
+        {crops.length > 0 && (
+          <span className="flex gap-1 text-2xl items-center ml-2">
+            {crops.map((crop: any, idx: number) => {
+              const icon = typeof crop === 'string' ? CROP_ICONS[crop] || '🌱' : crop.icon;
+              return <span key={idx} title={typeof crop === 'string' ? crop : crop.name} className="flex items-center"><EmojiIcon emoji={icon} size={28} /></span>;
+            })}
+          </span>
+        )}
+      </h2>
       
       {/* Grid Layout: System connections */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -114,43 +126,6 @@ export default function FacilityOverviewCard({ deviceId, facilityName, showNotif
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${wifiSsid ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>
                 {wifiSsid ? 'Wired' : 'Offline'}
               </span>
-            </div>
-
-            {/* MQTT Broker Card */}
-            <div className="flex justify-between items-center p-3.5 bg-light rounded-xl">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-info/10 flex items-center justify-center text-info">
-                  <i className="mdi mdi-server-network text-lg"></i>
-                </div>
-                <div>
-                  <span className="block text-[10px] text-gray-400 font-semibold uppercase tracking-wider">MQTT Broker</span>
-                  <span className="text-sm font-bold text-primary truncate max-w-[120px] block">
-                    {mqttServer ? (mqttServer.includes('hivemq') ? 'HiveMQ Cloud' : mqttServer.split(':')[0]) : 'Not configured'}
-                  </span>
-                </div>
-              </div>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${mqttServer ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>
-                {mqttServer ? 'Connected' : 'Offline'}
-              </span>
-            </div>
-
-            {/* Supabase Connection */}
-            <div className="flex justify-between items-center p-3.5 bg-light rounded-xl">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-                  <i className="mdi mdi-database text-lg"></i>
-                </div>
-                <div>
-                  <span className="block text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Supabase DB</span>
-                  <span className="text-sm font-bold text-primary">Data Warehouse</span>
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className={`w-2 h-2 rounded-full inline-block ${dbConnected ? 'bg-success animate-pulse' : 'bg-danger'}`}></span>
-                <span className={`text-[10px] font-bold ${dbConnected ? 'text-success' : 'text-danger'}`}>
-                  {dbConnected ? 'Healthy' : 'Disconnected'}
-                </span>
-              </div>
             </div>
           </div>
         </div>
