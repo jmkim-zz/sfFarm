@@ -121,7 +121,7 @@ export default function Sidebar() {
   ];
 
   return (
-    <nav className="bg-primary text-white h-screen fixed w-[250px] overflow-y-auto flex flex-col pt-5 z-50">
+    <nav className="text-white h-[100dvh] w-full overflow-y-auto flex flex-col pt-5">
 
       <div className="flex-1">
         {navSections.map((section, idx) => (

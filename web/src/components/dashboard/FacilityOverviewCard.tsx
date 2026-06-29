@@ -3,8 +3,10 @@ import { supabase } from '../../lib/supabase';
 import { useSupabaseSensors, useSystemSettings, useEquipmentControl } from '../../app/dashboard/DashboardClient';
 import { CROP_ICONS } from '../layout/Sidebar';
 import EmojiIcon from '../ui/EmojiIcon';
+import { Calendar as CalendarIcon, MapPin } from 'lucide-react';
+import { getEvents } from '../../lib/calendar/googleCalendar';
 
-export default function FacilityOverviewCard({ deviceId, facilityName, showNotification, SENSOR_METADATA, crops = [] }: any) {
+export default function FacilityOverviewCard({ deviceId, facilityName, showNotification, SENSOR_METADATA, crops = [], colorIndex = 0 }: any) {
   const sensors = useSupabaseSensors(deviceId);
   const { activeSensors, activeEquipment } = useSystemSettings(deviceId);
   const { equipment, customEquipmentStates, setCustomEquipmentStates, toggleEquipment } = useEquipmentControl(deviceId, showNotification);
@@ -17,6 +19,8 @@ export default function FacilityOverviewCard({ deviceId, facilityName, showNotif
   const [customSensors, setCustomSensors] = useState<any[]>([]);
   const [customEquipments, setCustomEquipments] = useState<any[]>([]);
   const [sensorConfigs, setSensorConfigs] = useState<Record<string, any>>({});
+  
+  const [maintenanceEvents, setMaintenanceEvents] = useState<any[]>([]);
 
   useEffect(() => {
     // Check DB Connection
@@ -88,12 +92,55 @@ export default function FacilityOverviewCard({ deviceId, facilityName, showNotif
     loadConfigs();
   }, [deviceId, activeSensors, customSensors, SENSOR_METADATA]);
 
+  useEffect(() => {
+    const fetchMaintenanceEvents = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.provider_token || !session?.user?.user_metadata?.calendar_id) return;
+
+      const token = session.provider_token;
+      const calendarId = session.user.user_metadata.calendar_id;
+
+      const timeMin = new Date().toISOString();
+      const timeMax = new Date();
+      timeMax.setMonth(timeMax.getMonth() + 1); // 1 month later
+
+      try {
+        const data = await getEvents(token, calendarId, timeMin, timeMax.toISOString());
+        const filtered = (data.items || []).filter((e: any) => {
+          const title = e.summary || '';
+          return title.startsWith(`[${facilityName}]`) || title.startsWith(`[All]`) || !title.startsWith('[');
+        });
+        setMaintenanceEvents(filtered);
+      } catch (err) {
+        console.error("Failed to fetch calendar events for facility card", err);
+      }
+    };
+    fetchMaintenanceEvents();
+  }, [facilityName]);
+
+  const THEMES = [
+    { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-700', iconBg: 'bg-slate-100', iconText: 'text-slate-600' },
+    { bg: 'bg-emerald-50/60', border: 'border-emerald-200', text: 'text-emerald-800', iconBg: 'bg-emerald-100', iconText: 'text-emerald-600' },
+    { bg: 'bg-blue-50/60', border: 'border-blue-200', text: 'text-blue-800', iconBg: 'bg-blue-100', iconText: 'text-blue-600' },
+    { bg: 'bg-purple-50/60', border: 'border-purple-200', text: 'text-purple-800', iconBg: 'bg-purple-100', iconText: 'text-purple-600' },
+    { bg: 'bg-amber-50/60', border: 'border-amber-200', text: 'text-amber-800', iconBg: 'bg-amber-100', iconText: 'text-amber-600' }
+  ];
+  
+  const theme = THEMES[colorIndex % THEMES.length];
+
   return (
-    <div className="mt-8 space-y-6">
-      <h2 className="text-2xl font-bold text-gray-800 border-b pb-2 flex items-center gap-2">
+    <div className={`p-6 md:p-8 rounded-[2rem] border-2 shadow-sm relative overflow-hidden transition-all duration-300 ${theme.bg} ${theme.border}`}>
+      
+      {/* 둥근 외곽 장식 (선택사항) */}
+      <div className={`absolute -top-12 -right-12 w-32 h-32 rounded-full opacity-50 ${theme.iconBg}`}></div>
+
+      <h2 className={`text-2xl md:text-3xl font-extrabold border-b-2 border-white/50 pb-4 mb-6 flex items-center gap-3 relative z-10 ${theme.text}`}>
+        <div className={`p-2 rounded-xl ${theme.iconBg} ${theme.iconText} shadow-sm`}>
+          <MapPin size={24} />
+        </div>
         {facilityName}
         {crops.length > 0 && (
-          <span className="flex gap-1 text-2xl items-center ml-2">
+          <span className="flex gap-1 text-2xl items-center ml-2 bg-white/50 px-3 py-1 rounded-full shadow-sm">
             {crops.map((crop: any, idx: number) => {
               const icon = typeof crop === 'string' ? CROP_ICONS[crop] || '🌱' : crop.icon;
               return <span key={idx} title={typeof crop === 'string' ? crop : crop.name} className="flex items-center"><EmojiIcon emoji={icon} size={28} /></span>;
@@ -102,6 +149,50 @@ export default function FacilityOverviewCard({ deviceId, facilityName, showNotif
         )}
       </h2>
       
+      {/* Maintenance Events */}
+      {maintenanceEvents.length > 0 && (
+        <div className="bg-white rounded-2xl p-6 shadow-[0_4px_20px_rgba(0,0,0,0.03)] border border-gray-100 mb-6">
+          <h3 className="text-lg font-bold text-primary flex items-center gap-2 mb-4">
+            <CalendarIcon className="text-secondary" size={20} />
+            Upcoming Maintenance (Next 30 Days)
+          </h3>
+          <div className="flex flex-col gap-3">
+            {maintenanceEvents.map((event, idx) => {
+              const dateStr = event.start.dateTime || event.start.date;
+              let dateDisplay = 'Unknown Date';
+              if (dateStr) {
+                const d = new Date(dateStr);
+                dateDisplay = `${d.getMonth() + 1}/${d.getDate()}`;
+                if (event.start.dateTime) {
+                  dateDisplay += ` ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+                }
+              }
+              
+              let title = event.summary || '(No title)';
+              if (title.startsWith('[')) {
+                title = title.substring(title.indexOf(']') + 1).trim();
+              }
+
+              return (
+                <div key={event.id || idx} className="flex items-center justify-between p-3 bg-blue-50/40 hover:bg-blue-50/70 transition-colors rounded-xl border border-blue-100/50">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-white text-secondary font-bold text-sm px-3 py-1.5 rounded-lg border border-blue-100 min-w-[70px] text-center shadow-sm">
+                      {dateDisplay}
+                    </div>
+                    <span className="font-semibold text-gray-800">{title}</span>
+                  </div>
+                  {event.description && (
+                    <span className="text-sm text-gray-500 hidden md:block max-w-xs xl:max-w-md truncate" title={event.description}>
+                      {event.description}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Grid Layout: System connections */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Connection Information */}

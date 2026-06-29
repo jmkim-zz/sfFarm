@@ -2,10 +2,12 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { LayoutGrid, Play, ChevronRight, Square, FolderOpen, SlidersHorizontal, CheckCircle, AlertTriangle, XCircle, Info, X, Cpu, Settings2, Users, CircuitBoard, Wifi, Copy, Download, Code, Server, Terminal, Database, Key, Cloud, FileCode2, Tractor } from 'lucide-react';
+import { LayoutGrid, Play, ChevronRight, Square, FolderOpen, SlidersHorizontal, CheckCircle, AlertTriangle, XCircle, Info, X, Cpu, Settings2, Users, CircuitBoard, Wifi, Copy, Download, Code, Server, Terminal, Database, Key, Cloud, FileCode2, Tractor, Thermometer, Droplets, Sun, Activity, Settings, Maximize2, Plus, Trash2, Shield, Leaf, LayoutDashboard, Calendar, RefreshCw, Smartphone, MapPin, Save, FileText } from 'lucide-react';
 import { supabase } from '../../lib/supabase/client';
 import FacilitiesSettings from '../../components/settings/FacilitiesSettings';
+import FarmingJournal from '../../components/dashboard/FarmingJournal';
 import FacilityOverviewCard from '../../components/dashboard/FacilityOverviewCard';
+import MaintenanceSchedule from '../../components/dashboard/MaintenanceSchedule';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 
 // 알림(Notification) 타입을 정의하고 관리하는 커스텀 훅
@@ -1723,7 +1725,11 @@ while True:
     await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/dashboard`
+        redirectTo: `${window.location.origin}/dashboard`,
+        scopes: 'https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/spreadsheets',
+        queryParams: {
+          prompt: 'consent',
+        }
       }
     });
   };
@@ -1980,8 +1986,8 @@ while True:
           </div>
 
           {/* Facility Overview Cards */}
-          <div className="mt-8 space-y-8">
-            {facilities.map((facility) => (
+          <div className="mt-8 space-y-12">
+            {facilities.map((facility, idx) => (
               <FacilityOverviewCard 
                 key={facility.device_id}
                 deviceId={facility.device_id} 
@@ -1989,6 +1995,7 @@ while True:
                 showNotification={showNotification}
                 SENSOR_METADATA={SENSOR_METADATA}
                 crops={facility.crops || []}
+                colorIndex={idx}
               />
             ))}
             {facilities.length === 0 && (
@@ -2237,9 +2244,9 @@ while True:
               })}
             </div>
 
-          <div className="flex justify-between items-center mb-6">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
             <h2 className="text-2xl font-semibold text-primary">Sensor Settings</h2>
-            <div className="flex gap-4">
+            <div className="flex flex-wrap gap-2 md:gap-4">
               <button 
                 onClick={async () => {
                   const defaultSensors = ["Temperature", "Light Intensity", "Humidity", "Hydrogen Ion Concentration", "Electrical Conductivity", "Dissolved Oxygen", "Carbon Dioxide"];
@@ -2444,16 +2451,16 @@ while True:
               })}
             </div>
 
-          <div className="flex justify-between items-center mb-6">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
             <h2 className="text-2xl font-semibold text-primary">Equipment Control</h2>
-            <div className="flex gap-4">
-              <button onClick={() => setIsEquipConfigModalOpen(true)} className="flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-full transition-all">
+            <div className="flex flex-wrap gap-2 md:gap-4">
+              <button onClick={() => setIsEquipConfigModalOpen(true)} className="flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-3 md:px-4 py-2 rounded-full transition-all text-sm md:text-base">
                 <SlidersHorizontal size={18} /> Configure
               </button>
-              <button onClick={startAll} className="flex items-center gap-2 bg-state-on hover:bg-state-on/90 text-white px-4 py-2 rounded-full transition-all">
+              <button onClick={startAll} className="flex items-center gap-2 bg-state-on hover:bg-state-on/90 text-white px-3 md:px-4 py-2 rounded-full transition-all text-sm md:text-base">
                 <Play size={18} /> Start All
               </button>
-              <button onClick={stopAll} className="flex items-center gap-2 bg-state-off hover:bg-state-off/90 text-white px-4 py-2 rounded-full transition-all">
+              <button onClick={stopAll} className="flex items-center gap-2 bg-state-off hover:bg-state-off/90 text-white px-3 md:px-4 py-2 rounded-full transition-all text-sm md:text-base">
                 <Square size={18} /> Stop All
               </button>
             </div>
@@ -2552,6 +2559,16 @@ while True:
             </button>
           </div>
         </div>
+      )}
+
+      {/* Maintenance Schedule Tab */}
+      {currentTab === 'maintenance' && (
+        <MaintenanceSchedule />
+      )}
+
+      {/* Farming Journal Tab */}
+      {currentTab === 'reports' && (
+        <FarmingJournal />
       )}
 
       {/* System Settings Tab */}
@@ -3197,8 +3214,8 @@ while True:
             <div className="mb-4">
               <label className="block mb-2 font-medium text-primary">Sensor Sampling Rate</label>
               <div className="flex gap-2">
-                <input type="number" min="1" step="any" className="flex-1 p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" placeholder="Enter value" value={configRateValue} onChange={e => setConfigRateValue(e.target.value)} />
-                <select className="w-[140px] p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" value={configRateUnit} onChange={e => setConfigRateUnit(e.target.value)}>
+                <input type="number" min="1" step="any" className="w-[100px] md:w-[120px] p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" placeholder="Value" value={configRateValue} onChange={e => setConfigRateValue(e.target.value)} />
+                <select className="w-[140px] md:w-[160px] p-3 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors" value={configRateUnit} onChange={e => setConfigRateUnit(e.target.value)}>
                   <option value="second">Second(s)</option>
                   <option value="minute">Minute(s)</option>
                   <option value="hour">Hour(s)</option>
