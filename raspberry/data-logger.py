@@ -62,6 +62,8 @@ logger_status_map = {} # device_id -> boolean
 state_lock = threading.Lock()  # Thread lock for thread-safe operations
 equipment_schedules = {}
 message_queue = queue.Queue() # device_id -> { equip_name -> schedule_data }
+latest_sensor_data = {} # device_id -> { sensor_key -> float }
+timer_states = {} # f"{device_id}/{equip_name}" -> { "state": "ON"|"OFF", "last_switch": float }
 
 # 2. Read configuration from DB and process dynamic subscriptions
 def update_subscriptions(client):
@@ -264,7 +266,11 @@ def message_worker_loop():
 
             print(f"\n[MQTT Sensor Msg Received] Topic: {topic} | Payload: {payload_str}")
 
-            # Buffer payload for averaging per sensor
+            # Buffer payload for averaging per sensor and save latest value
+            with state_lock:
+                if device_id not in latest_sensor_data:
+                    latest_sensor_data[device_id] = {}
+                    
             with buffer_lock:
                 if topic not in data_buffer:
                     data_buffer[topic] = {}
@@ -272,6 +278,12 @@ def message_worker_loop():
                     
                 for k, v in data.items():
                     try:
+                        with state_lock:
+                            try:
+                                latest_sensor_data[device_id][k] = float(v)
+                            except (ValueError, TypeError):
+                                pass
+                        
                         if k not in data_buffer[topic]:
                             data_buffer[topic][k] = []
                             last_sync_time[topic][k] = time.time()
@@ -359,11 +371,20 @@ def db_sync_loop():
                     print(f"[Error] Failed to insert data for {topic}: {e}")
 
 def is_time_in_schedule(sched):
-    if sched.get('isContinuous'):
-        return True
-    
-    start_str = sched.get('start')
-    stop_str = sched.get('stop')
+    # Support Phase 2.5 Advanced JSON Schema
+    if "activeWindow" in sched:
+        active_window = sched["activeWindow"]
+        if active_window.get('isContinuous'):
+            return True
+        start_str = active_window.get('start')
+        stop_str = active_window.get('stop')
+    else:
+        # Legacy schema fallback
+        if sched.get('isContinuous'):
+            return True
+        start_str = sched.get('start')
+        stop_str = sched.get('stop')
+        
     if not start_str or not stop_str:
         return False
         
@@ -382,9 +403,104 @@ def is_time_in_schedule(sched):
 
 last_published_state = {}
 
+def evaluate_equipment_state(device_id, equip_name, sched):
+    # Step 1: Active Time Window Check
+    if not is_time_in_schedule(sched):
+        return "OFF"
+        
+    target_state = "OFF"
+    
+    # Extract Operation Mode (Phase 2.5) or default to Always ON (Legacy)
+    op_mode = sched.get("operationMode", {"type": "alwaysOn"})
+    mode_type = op_mode.get("type", "alwaysOn")
+    
+    # Step 2: Operation Mode Evaluation
+    if mode_type == "alwaysOn":
+        target_state = "ON"
+        
+    elif mode_type == "sensor":
+        sensor_cfg = op_mode.get("sensorConfig", {})
+        sensor_name = sensor_cfg.get("targetSensor", "")
+        target_val = float(sensor_cfg.get("targetValue", 0))
+        deadband = float(sensor_cfg.get("deadband", 0))
+        behavior = sensor_cfg.get("behavior", "high")
+        
+        # Get latest cached sensor value
+        with state_lock:
+            latest_val = latest_sensor_data.get(device_id, {}).get(sensor_name)
+            
+        if latest_val is not None:
+            # Symmetrical deadband logic
+            if behavior == "high": # Turn ON when value is High (Above target+deadband), Turn OFF when Low (Below target-deadband)
+                if latest_val >= (target_val + deadband):
+                    target_state = "ON"
+                elif latest_val <= (target_val - deadband):
+                    target_state = "OFF"
+                else:
+                    # In deadband: keep last state
+                    target_state = last_published_state.get(f"{device_id}/{equip_name}", "OFF")
+            elif behavior == "low": # Turn ON when value is Low (Below target-deadband), Turn OFF when High (Above target+deadband)
+                if latest_val <= (target_val - deadband):
+                    target_state = "ON"
+                elif latest_val >= (target_val + deadband):
+                    target_state = "OFF"
+                else:
+                    # In deadband: keep last state
+                    target_state = last_published_state.get(f"{device_id}/{equip_name}", "OFF")
+        else:
+            # Failsafe: if sensor data is unavailable, default to OFF
+            target_state = "OFF"
+            
+    elif mode_type == "timer":
+        timer_cfg = op_mode.get("timerConfig", {})
+        on_duration = float(timer_cfg.get("onDurationMinutes", 15)) * 60.0 # to seconds
+        off_duration = float(timer_cfg.get("offDurationMinutes", 15)) * 60.0
+        
+        state_key = f"{device_id}/{equip_name}"
+        current_time = time.time()
+        
+        with state_lock:
+            timer_st = timer_states.get(state_key)
+            if not timer_st:
+                # Initialize
+                timer_states[state_key] = {"state": "ON", "last_switch": current_time}
+                target_state = "ON"
+            else:
+                elapsed = current_time - timer_st["last_switch"]
+                if timer_st["state"] == "ON":
+                    if elapsed >= on_duration:
+                        timer_states[state_key] = {"state": "OFF", "last_switch": current_time}
+                        target_state = "OFF"
+                    else:
+                        target_state = "ON"
+                else:
+                    if elapsed >= off_duration:
+                        timer_states[state_key] = {"state": "ON", "last_switch": current_time}
+                        target_state = "ON"
+                    else:
+                        target_state = "OFF"
+
+    # Step 3: Safety Override Check
+    safety = sched.get("safetyOverride", {})
+    if safety.get("enabled"):
+        safe_sensor = safety.get("sensor", "")
+        safe_cond = safety.get("condition", "below")
+        safe_thresh = float(safety.get("thresholdValue", 0))
+        
+        with state_lock:
+            safe_val = latest_sensor_data.get(device_id, {}).get(safe_sensor)
+            
+        if safe_val is not None:
+            if safe_cond == "below" and safe_val < safe_thresh:
+                target_state = "OFF"
+            elif safe_cond == "above" and safe_val > safe_thresh:
+                target_state = "OFF"
+                
+    return target_state
+
 def equipment_control_loop(client):
     print(f"[{'='*40}]")
-    print(f"[Equip Control] Starting equipment schedule control loop (Tick: 10s)")
+    print(f"[Equip Control] Starting Advanced Control Engine (Tick: 10s)")
     print(f"[{'='*40}]")
     while True:
         time.sleep(10)
@@ -393,14 +509,14 @@ def equipment_control_loop(client):
             
         for device_id, equips in schedules_copy.items():
             for equip_name, sched in equips.items():
-                target_state = "ON" if is_time_in_schedule(sched) else "OFF"
+                target_state = evaluate_equipment_state(device_id, equip_name, sched)
                 state_key = f"{device_id}/{equip_name}"
                 
                 if last_published_state.get(state_key) != target_state:
                     topic = f"smartfarm/{device_id}/equipment/{equip_name}/set"
                     client.publish(topic, target_state)
                     last_published_state[state_key] = target_state
-                    print(f"[Equipment Control] {topic} -> {target_state}")
+                    print(f"[Equip Control Engine] {topic} -> {target_state} (Schedule evaluated)")
 
 # 5. Simulator Loop (Runs as a background thread)
 def simulator_loop(client):

@@ -219,7 +219,7 @@ export function useSupabaseSensors(deviceId: string | null) {
 
     // 2. 새로운 데이터가 INSERT 될 때마다 실시간 수신
     const channel = supabase
-      .channel(`realtime-dynamic-telemetry-sensors-${deviceId}`)
+      .channel(`realtime-dynamic-telemetry-sensors-${deviceId}-${Date.now()}-${Math.random()}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'dynamic_telemetry', filter: `device_id=eq.${deviceId}` },
@@ -362,7 +362,7 @@ export function useEquipmentControl(deviceId: string | null, showNotification: (
     
     // Realtime 구독 (Supabase에 app_settings가 Realtime 활성화되어 있는 경우)
     const channel = supabase
-      .channel(`equipment_status_updates_${deviceId}_${Date.now()}`)
+      .channel(`equipment_status_updates_${deviceId}_${Date.now()}_${Math.random()}`)
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'app_settings', filter: `key=eq.sf_equipment_status_${deviceId}` },
@@ -608,7 +608,7 @@ export default function DashboardClient() {
     fetchFacilities();
 
     // Subscribe to changes in device_configs so facilities list updates immediately
-    const channel = supabase.channel('realtime-device-configs-dashboard')
+    const channel = supabase.channel(`realtime-device-configs-dashboard-${Date.now()}-${Math.random()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'device_configs' }, () => {
         fetchFacilities();
       }).subscribe();
@@ -825,7 +825,7 @@ export default function DashboardClient() {
     if (dashboardMode !== 'realtime') return;
 
     const channel = supabase
-      .channel('realtime-telemetry')
+      .channel(`realtime-telemetry-${Date.now()}-${Math.random()}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'dynamic_telemetry', filter: `device_id=eq.${resolvedDeviceId}` },
@@ -947,10 +947,10 @@ export default function DashboardClient() {
   // 커스텀 장비 설정 로드
   useEffect(() => {
     const loadCustomEq = async () => {
-      const { data } = await supabase.from('app_settings').select('value').eq('key', `sf_custom_equipment_${currentDeviceId}`).single();
+      const { data } = await supabase.from('app_settings').select('value').eq('key', `sf_custom_equipment_${resolvedDeviceId}`).single();
       let parsed = data?.value;
       if (!parsed) {
-        const saved = localStorage.getItem(`sf_custom_equipment_${currentDeviceId}`);
+        const saved = localStorage.getItem(`sf_custom_equipment_${resolvedDeviceId}`);
         if (saved) parsed = JSON.parse(saved);
       }
       if (parsed) {
@@ -961,15 +961,15 @@ export default function DashboardClient() {
       }
     };
     loadCustomEq();
-    }, [currentDeviceId]);
+    }, [resolvedDeviceId]);
 
   // 커스텀 센서 설정 로드
   useEffect(() => {
     const loadCustomSensors = async () => {
-      const { data } = await supabase.from('app_settings').select('value').eq('key', `sf_custom_sensors_${currentDeviceId}`).single();
+      const { data } = await supabase.from('app_settings').select('value').eq('key', `sf_custom_sensors_${resolvedDeviceId}`).single();
       let parsed = data?.value;
       if (!parsed) {
-        const saved = localStorage.getItem(`sf_custom_sensors_${currentDeviceId}`);
+        const saved = localStorage.getItem(`sf_custom_sensors_${resolvedDeviceId}`);
         if (saved) parsed = JSON.parse(saved);
       }
       if (parsed) {
@@ -977,7 +977,7 @@ export default function DashboardClient() {
       }
     };
     loadCustomSensors();
-    }, [currentDeviceId]);
+    }, [resolvedDeviceId]);
 
   const handleSaveCustomEquipment = async () => {
     if (!newEqName.trim()) return showNotification('Please enter the equipment name.', 'warning');
@@ -985,8 +985,8 @@ export default function DashboardClient() {
     const updatedList = [...customEquipments, newEq];
     setCustomEquipments(updatedList);
     setCustomEquipmentStates(prev => ({ ...prev, [newEq.id]: false }));
-    await supabase.from('app_settings').upsert({ key: `sf_custom_equipment_${currentDeviceId}`, value: updatedList });
-    localStorage.setItem(`sf_custom_equipment_${currentDeviceId}`, JSON.stringify(updatedList));
+    await supabase.from('app_settings').upsert({ key: `sf_custom_equipment_${resolvedDeviceId}`, value: updatedList });
+    localStorage.setItem(`sf_custom_equipment_${resolvedDeviceId}`, JSON.stringify(updatedList));
     showNotification(`${newEqName} added successfully!`, 'success');
     setIsAddEqModalOpen(false);
     setNewEqName('');
@@ -1011,7 +1011,7 @@ export default function DashboardClient() {
       upperLimit: upper
     };
 
-    const configKey = `sf_sensor_config_${currentDeviceId}_${newSensorName.replace(/\s+/g, '_')}`;
+    const configKey = `sf_sensor_config_${resolvedDeviceId}_${newSensorName.replace(/\s+/g, '_')}`;
     const initialConfig = {
       samplingRateValue: parseFloat(newSensorRateValue) || 10,
       samplingRateUnit: newSensorRateUnit,
@@ -1025,8 +1025,8 @@ export default function DashboardClient() {
 
     const updatedList = [...customSensors, newSensor];
     setCustomSensors(updatedList);
-    await supabase.from('app_settings').upsert({ key: `sf_custom_sensors_${currentDeviceId}`, value: updatedList });
-    localStorage.setItem(`sf_custom_sensors_${currentDeviceId}`, JSON.stringify(updatedList));
+    await supabase.from('app_settings').upsert({ key: `sf_custom_sensors_${resolvedDeviceId}`, value: updatedList });
+    localStorage.setItem(`sf_custom_sensors_${resolvedDeviceId}`, JSON.stringify(updatedList));
     showNotification(`${newSensorName} added successfully!`, 'success');
     
     setIsAddSensorModalOpen(false);
@@ -1053,11 +1053,11 @@ export default function DashboardClient() {
     const equipList = [...Object.keys(equipmentNamesList), ...customEquipments.map(eq => eq.id)];
     const newSchedules: Record<string, any> = {};
     
-    const keys = equipList.map(e => `sf_equip_schedule_${currentDeviceId}_${e}`);
+    const keys = equipList.map(e => `sf_equip_schedule_${resolvedDeviceId}_${e}`);
     const { data } = await supabase.from('app_settings').select('key, value').in('key', keys);
     
     equipList.forEach(e => {
-      const key = `sf_equip_schedule_${currentDeviceId}_${e}`;
+      const key = `sf_equip_schedule_${resolvedDeviceId}_${e}`;
       const dbItem = data?.find(d => d.key === key);
       if (dbItem?.value) {
         newSchedules[e] = dbItem.value;
@@ -1071,7 +1071,7 @@ export default function DashboardClient() {
 
   useEffect(() => {
     loadAllEquipSchedules();
-    }, [customEquipments, currentDeviceId]);
+    }, [customEquipments, resolvedDeviceId]);
 
   useEffect(() => {
     if (isEquipConfigModalOpen) {
@@ -1106,7 +1106,7 @@ export default function DashboardClient() {
     const stopStr = `${equipStopAmPm} ${equipStopHour.padStart(2, '0')}:${equipStopMinute.padStart(2, '0')}`;
     const scheduleData = { start: startStr, stop: stopStr, isContinuous: equipIsContinuous };
 
-    const key = `sf_equip_schedule_${currentDeviceId}_${configEquip}`;
+    const key = `sf_equip_schedule_${resolvedDeviceId}_${configEquip}`;
     await supabase.from('app_settings').upsert({ key, value: scheduleData });
     localStorage.setItem(key, JSON.stringify(scheduleData));
     
@@ -1206,7 +1206,7 @@ export default function DashboardClient() {
   useEffect(() => {
     const loadConfig = async () => {
       if (isConfigModalOpen) {
-        const key = `sf_sensor_config_${currentDeviceId}_${configSensor.replace(/\s+/g, '_')}`;
+        const key = `sf_sensor_config_${resolvedDeviceId}_${configSensor.replace(/\s+/g, '_')}`;
         const { data } = await supabase.from('app_settings').select('value').eq('key', key).single();
         let parsed = data?.value;
         
@@ -1262,11 +1262,11 @@ export default function DashboardClient() {
     ];
     const newConfigs: Record<string, any> = {};
     
-    const keys = sensorsList.map(s => `sf_sensor_config_${currentDeviceId}_${s.replace(/\s+/g, '_')}`);
+    const keys = sensorsList.map(s => `sf_sensor_config_${resolvedDeviceId}_${s.replace(/\s+/g, '_')}`);
     const { data } = await supabase.from('app_settings').select('key, value').in('key', keys);
     
     sensorsList.forEach(s => {
-      const key = `sf_sensor_config_${currentDeviceId}_${s.replace(/\s+/g, '_')}`;
+      const key = `sf_sensor_config_${resolvedDeviceId}_${s.replace(/\s+/g, '_')}`;
       const dbItem = data?.find(d => d.key === key);
       if (dbItem?.value) {
         newConfigs[s] = dbItem.value;
@@ -1292,7 +1292,7 @@ export default function DashboardClient() {
 
   useEffect(() => {
     loadAllSensorConfigs();
-    }, [customSensors, currentDeviceId]);
+    }, [customSensors, resolvedDeviceId]);
   
   // 아두이노 핀 연결 상태 관리
   // 사용자가 쉽게 테스트할 수 있도록 자주 쓰이는 센서/기기를 기본값으로 세팅
@@ -1337,7 +1337,7 @@ export default function DashboardClient() {
   const [remoteLoggerRunning, setRemoteLoggerRunning] = useState<boolean>(false);
 
   // Supabase 실시간 센서 데이터 연동
-  const sensors = useSupabaseSensors(currentDeviceId);
+  const sensors = useSupabaseSensors(resolvedDeviceId);
 
   // Network & MQTT Configuration 로드
   useEffect(() => {
@@ -1411,12 +1411,12 @@ export default function DashboardClient() {
   // Hardware Pin Configuration 로드
   useEffect(() => {
     const loadHardwareSettings = async () => {
-      if (!currentDeviceId) return;
+      if (!resolvedDeviceId) return;
       
-      let { data } = await supabase.from('app_settings').select('value').eq('key', `sf_hardware_pins_${currentDeviceId}`).single();
+      let { data } = await supabase.from('app_settings').select('value').eq('key', `sf_hardware_pins_${resolvedDeviceId}`).single();
       let parsed = data?.value;
       if (!parsed) {
-        const saved = localStorage.getItem(`sf_hardware_pins_${currentDeviceId}`);
+        const saved = localStorage.getItem(`sf_hardware_pins_${resolvedDeviceId}`);
         if (saved) parsed = JSON.parse(saved);
       }
       
@@ -1473,15 +1473,15 @@ export default function DashboardClient() {
       }
     };
     loadHardwareSettings();
-  }, [currentDeviceId]);
+  }, [resolvedDeviceId]);
 
   // Hardware Pin Configuration 저장
   const handleSaveHardwareConfig = async () => {
-    if (!currentDeviceId) return;
+    if (!resolvedDeviceId) return;
     const hardwareData = { pinConfigs, pinMappings, pinMqttTopics, pinCounts };
-    await supabase.from('app_settings').upsert({ key: `sf_hardware_pins_${currentDeviceId}`, value: hardwareData });
-    localStorage.setItem(`sf_hardware_pins_${currentDeviceId}`, JSON.stringify(hardwareData));
-    showNotification(`Hardware pin configuration saved for ${currentDeviceId}!`, 'success');
+    await supabase.from('app_settings').upsert({ key: `sf_hardware_pins_${resolvedDeviceId}`, value: hardwareData });
+    localStorage.setItem(`sf_hardware_pins_${resolvedDeviceId}`, JSON.stringify(hardwareData));
+    showNotification(`Hardware pin configuration saved for ${resolvedDeviceId}!`, 'success');
   };
 
   // 라즈베리파이 원격 로거 시작/정지 토글 함수
@@ -1542,9 +1542,9 @@ export default function DashboardClient() {
           
           // Auto-generate topic based on type
           if (isEquipment) {
-            return `smartfarm/${currentDeviceId || 'pooh'}/equipment/${mappingVal}`;
+            return `smartfarm/${resolvedDeviceId || 'pooh'}/equipment/${mappingVal}`;
           } else {
-            return `smartfarm/${currentDeviceId || 'pooh'}/${mappingVal}`;
+            return `smartfarm/${resolvedDeviceId || 'pooh'}/${mappingVal}`;
           }
         });
         next[index] = newTopics;
@@ -1722,7 +1722,7 @@ export default function DashboardClient() {
       lastUpdated: new Date().toISOString()
     };
     
-    const key = `sf_sensor_config_${currentDeviceId}_${configSensor.replace(/\s+/g, '_')}`;
+    const key = `sf_sensor_config_${resolvedDeviceId}_${configSensor.replace(/\s+/g, '_')}`;
     await supabase.from('app_settings').upsert({ key, value: configData });
     localStorage.setItem(key, JSON.stringify(configData));
     
@@ -2267,11 +2267,11 @@ export default function DashboardClient() {
                   const defaultSensors = ["Temperature", "Light Intensity", "Humidity", "Hydrogen Ion Concentration", "Electrical Conductivity", "Dissolved Oxygen", "Carbon Dioxide"];
                   const customNames = customSensors.map(cs => cs.name);
                   const sensorsList = [...defaultSensors, ...customNames];
-                  const keys = sensorsList.map(s => `sf_sensor_config__`);
+                  const keys = sensorsList.map(s => `sf_sensor_config_${resolvedDeviceId}_${s.replace(/\s+/g, '_')}`);
                   const { data } = await supabase.from('app_settings').select('key, value').in('key', keys);
 
                   const configs = sensorsList.map(s => {
-                    const key = `sf_sensor_config_${currentDeviceId}_${s.replace(/\s+/g, '_')}`;
+                    const key = `sf_sensor_config_${resolvedDeviceId}_${s.replace(/\s+/g, '_')}`;
                     const dbItem = data?.find(d => d.key === key);
                     if (dbItem?.value) return { sensor: s, ...dbItem.value };
                     
@@ -2666,28 +2666,6 @@ export default function DashboardClient() {
                 </div>
               </div>
             </div>
-
-            {/* WiFi Config */}
-            <div className="bg-white rounded-xl p-6 shadow-sm border-t-4 border-success">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold text-primary flex items-center gap-2"><Wifi size={20}/> WiFi Setup (For Devices)</h3>
-                <button onClick={handleSaveSysWifi} className="bg-primary hover:bg-primary/90 text-white px-3 py-1.5 rounded text-sm font-medium transition-colors">Save</button>
-              </div>
-              <div className="flex flex-col gap-3">
-                <div className="bg-yellow-50 text-yellow-700 p-2 rounded text-[11px] border border-yellow-200">
-                  <strong>Note:</strong> Web browsers cannot directly scan local WiFi networks due to security constraints. Please enter your network credentials manually below.
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Network Name (SSID)</label>
-                  <input type="text" placeholder="Enter WiFi SSID" value={sysWifiSsid} onChange={e => setSysWifiSsid(e.target.value)} className="w-full p-2 border border-gray-300 rounded focus:border-secondary outline-none text-sm" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Password</label>
-                  <input type="password" placeholder="Enter WiFi Password" value={sysWifiPass} onChange={e => setSysWifiPass(e.target.value)} className="w-full p-2 border border-gray-300 rounded focus:border-secondary outline-none text-sm" />
-                </div>
-              </div>
-            </div>
-
             {/* WiFi Scan & Setup Config */}
             <div className="bg-white rounded-xl p-6 shadow-sm border-t-4 border-emerald-500">
               <div className="flex justify-between items-center mb-4">
