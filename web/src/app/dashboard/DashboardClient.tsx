@@ -1320,8 +1320,6 @@ export default function DashboardClient() {
   const [isPythonModalOpen, setIsPythonModalOpen] = useState(false);
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
   const [remoteLoggerRunning, setRemoteLoggerRunning] = useState<boolean>(false);
-  const [generatedAgentCode, setGeneratedAgentCode] = useState<string>('');
-  const [isAgentModalOpen, setIsAgentModalOpen] = useState(false);
 
   // Supabase 실시간 센서 데이터 연동
   const sensors = useSupabaseSensors(currentDeviceId);
@@ -1475,7 +1473,7 @@ export default function DashboardClient() {
   const handleToggleRemoteLogger = async (state: boolean) => {
     setRemoteLoggerRunning(state);
     await supabase.from('app_settings').upsert({ key: `sf_logger_status_${resolvedDeviceId}`, value: { running: state } });
-    showNotification(state ? 'Start command sent to Raspberry Pi Agent!' : 'Stop command sent to Raspberry Pi Agent.', state ? 'success' : 'warning');
+    showNotification(state ? 'Start command sent to Raspberry Pi Data Logger!' : 'Stop command sent to Raspberry Pi Data Logger.', state ? 'success' : 'warning');
   };
 
   const handlePinDeviceChange = (pinId: string, index: number, value: string) => {
@@ -1688,66 +1686,6 @@ export default function DashboardClient() {
     } finally {
       setIsGeneratingCode(false);
     }
-  };
-
-  // 파수꾼 에이전트(agent.py) 코드 자동 생성 함수
-  const handleGenerateAgentCode = () => {
-    const agentCode = `import os
-import time
-import subprocess
-from supabase import create_client, Client
-from dotenv import load_dotenv
-
-# 1. Load environment variables (.env)
-load_dotenv()
-
-# ==============================================================================
-# [WARNING] [User Settings - Required Configuration] [WARNING]
-# Create a .env file matching your deployment environment,
-# or replace os.getenv(...) calls directly with your real credentials.
-# ==============================================================================
-
-# 1. Supabase Configuration
-# SUPABASE_URL: Supabase Project URL (e.g., "https://xxxx.supabase.co")
-# SUPABASE_KEY: Supabase Service Role Key (Be careful: keep it secret!)
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-DEVICE_ID = os.getenv("DEVICE_ID", "${resolvedDeviceId}")
-
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("[Error] Supabase configuration is missing. Configure .env or edit the script.")
-
-# ==============================================================================
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-logger_process = None
-
-print("Agent is running and listening for remote commands from Dashboard...")
-
-while True:
-    try:
-        response = supabase.table("app_settings").select("value").eq("key", f"sf_logger_status_{DEVICE_ID}").execute()
-        
-        if response.data and len(response.data) > 0:
-            settings = response.data[0].get("value", {})
-            should_run = settings.get("running", False)
-
-            if should_run and logger_process is None:
-                print("[Command Received] START -> Starting data-logger.py...")
-                logger_process = subprocess.Popen(["python", "data-logger.py"])
-            elif not should_run and logger_process is not None:
-                print("[Command Received] STOP -> Terminating data-logger.py...")
-                logger_process.terminate()
-                logger_process.wait()
-                logger_process = None
-                
-    except Exception as e:
-        print(f"Error checking status: {e}")
-
-    time.sleep(5) # Check dashboard switch status every 5 seconds
-`;
-    setGeneratedAgentCode(agentCode);
-    setIsAgentModalOpen(true);
   };
 
   // 설정 리뷰 및 검증 로직
@@ -3052,26 +2990,31 @@ while True:
           
           <div className="grid md:grid-cols-2 gap-6">
             {/* 원격 프로세스 제어 패널 */}
-            <div className="bg-white rounded-xl p-8 shadow-[0_4px_12px_rgba(0,0,0,0.05)] border-t-4 border-secondary flex flex-col justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-primary mb-4 flex items-center gap-2"><Server size={24} /> Remote Logger Control</h3>
-                <p className="text-gray-600 text-sm mb-6">
-                  Start or stop the <code>data-logger.py</code> process running on your Raspberry Pi remotely from anywhere.
-                </p>
-              </div>
-              <div className="bg-gray-50 p-6 rounded-lg border border-gray-200 flex justify-between items-center">
-                <span className="font-medium text-gray-700">Logger Process Status</span>
-                <EquipmentItem name="" icon="" details="" description="" isOn={remoteLoggerRunning} onToggle={handleToggleRemoteLogger} isActive={true} />
-              </div>
+            <div className="bg-white rounded-xl p-8 shadow-[0_4px_12px_rgba(0,0,0,0.05)] border-t-4 border-secondary">
+              <h3 className="text-lg font-semibold text-primary mb-4 flex items-center gap-2"><Server size={24} /> Remote Logger Control</h3>
+              <p className="text-gray-600 text-sm mb-6">
+                Start or stop the <code>data-logger.py</code> process running on your Raspberry Pi remotely from anywhere.
+              </p>
               
-              <div className="mt-6 pt-4 border-t border-gray-200">
-                <p className="text-xs text-gray-500 mb-3 font-medium">To enable remote control, the Agent script must be running on your Raspberry Pi.</p>
-                <button onClick={handleGenerateAgentCode} className="w-full flex justify-center items-center gap-2 bg-secondary hover:bg-secondary/90 text-white px-4 py-2.5 rounded-lg font-medium transition-all shadow-sm text-sm">
-                  <Terminal size={18} /> Generate agent.py
-                </button>
+              <div className="bg-gray-50/80 p-5 rounded-2xl border border-gray-100 flex justify-between items-center transition-all hover:bg-gray-50">
+                <div className="flex items-center gap-3">
+                  <div className={`w-3 h-3 rounded-full ${remoteLoggerRunning ? 'bg-success animate-pulse' : 'bg-gray-300'}`}></div>
+                  <span className="font-semibold text-gray-700">Logger Process Status</span>
+                </div>
+                
+                <div className="flex items-center gap-4">
+                  <span className={`px-3 py-1 rounded-full text-xs font-bold text-white transition-colors duration-300 ${remoteLoggerRunning ? 'bg-success shadow-[0_0_10px_rgba(34,197,94,0.4)]' : 'bg-gray-400'}`}>
+                    {remoteLoggerRunning ? 'RUNNING' : 'STOPPED'}
+                  </span>
+                  <label className="relative inline-block w-[50px] h-[24px]">
+                    <input type="checkbox" className="opacity-0 w-0 h-0 peer" checked={remoteLoggerRunning} onChange={(e) => handleToggleRemoteLogger(e.target.checked)} />
+                    <span className={`absolute cursor-pointer top-0 left-0 right-0 bottom-0 transition-[0.4s] rounded-[24px] bg-gray-300 peer-checked:bg-success
+                      before:absolute before:content-[''] before:h-[16px] before:w-[16px] before:left-[4px] before:bottom-[4px] before:bg-white before:transition-[0.4s] before:rounded-full peer-checked:before:translate-x-[26px] shadow-inner`}>
+                    </span>
+                  </label>
+                </div>
               </div>
             </div>
-
             {/* 코드 생성 패널 */}
             <div className="bg-white rounded-xl p-8 shadow-[0_4px_12px_rgba(0,0,0,0.05)] border-t-4 border-primary">
               <h3 className="text-lg font-semibold text-primary mb-4 flex items-center gap-2"><Terminal size={24} /> Python Edge Logger Setup</h3>
@@ -3122,10 +3065,10 @@ while True:
           {/* 가상 환경(venv) 배포 가이드 패널 */}
           <div className="bg-white rounded-xl p-8 shadow-[0_4px_12px_rgba(0,0,0,0.05)] border-t-4 border-info mt-6 text-left">
             <h3 className="text-lg font-semibold text-primary mb-4 flex items-center gap-2">
-              <Info size={24} className="text-info" /> Raspberry Pi <code>agent.py</code> 가상 환경(venv) 실행 가이드
+              <Info size={24} className="text-info" /> Raspberry Pi <code>data-logger.py</code> 가상 환경(venv) 실행 가이드
             </h3>
             <p className="text-gray-600 text-sm mb-6">
-              라즈베리파이의 격리된 Python 가상 환경(venv)에서 에이전트와 데이터 로거를 안전하고 지속적으로 실행하는 방법입니다.
+              라즈베리파이의 격리된 Python 가상 환경(venv)에서 데이터 로거를 안전하고 지속적으로 실행하는 방법입니다.
             </p>
             
             <div className="space-y-5 text-sm text-gray-700">
@@ -3139,7 +3082,7 @@ while True:
 
               <div>
                 <h4 className="font-bold text-primary mb-1">2. 프로젝트 폴더 구성 및 코드 복사</h4>
-                <p className="text-gray-500 mb-2">라즈베리파이에 폴더를 생성하고 발급받은 <code>data-logger.py</code>, <code>agent.py</code>, <code>.env</code> 파일을 업로드합니다.</p>
+                <p className="text-gray-500 mb-2">라즈베리파이에 폴더를 생성하고 다운로드받은 <code>data-logger.py</code>, <code>.env</code> 파일을 업로드합니다.</p>
                 <pre className="bg-light p-3.5 rounded-lg border border-gray-200 text-xs overflow-x-auto font-mono text-gray-800">
                   mkdir -p ~/smartfarm-logger{"\n"}
                   cd ~/smartfarm-logger
@@ -3158,23 +3101,23 @@ while True:
 
               <div>
                 <h4 className="font-bold text-primary mb-1">4. 의존성 라이브러리 설치</h4>
-                <p className="text-gray-500 mb-2">가상 환경이 활성화된 상태에서 로거 및 에이전트 구동에 필요한 패키지들을 설치합니다.</p>
+                <p className="text-gray-500 mb-2">가상 환경이 활성화된 상태에서 로거 구동에 필요한 패키지들을 설치합니다.</p>
                 <pre className="bg-light p-3.5 rounded-lg border border-gray-200 text-xs overflow-x-auto font-mono text-gray-800">
                   pip install --upgrade pip{"\n"}
-                  pip install paho-mqtt supabase websockets python-dotenv schedule
+                  pip install paho-mqtt supabase python-dotenv
                 </pre>
               </div>
 
               <div>
-                <h4 className="font-bold text-primary mb-1">5. 백그라운드 백데몬(Daemon)으로 실행</h4>
-                <p className="text-gray-500 mb-2">터미널 세션이 종료되어도 백그라운드에서 상시 명령 대기 상태를 유지하도록 nohup 명령어를 통해 백라이트 실행합니다.</p>
+                <h4 className="font-bold text-primary mb-1">5. 백그라운드 데몬(Daemon)으로 실행</h4>
+                <p className="text-gray-500 mb-2">터미널 세션이 종료되어도 백그라운드에서 상시 실행되도록 nohup 명령어를 사용합니다.</p>
                 <pre className="bg-light p-3.5 rounded-lg border border-gray-200 text-xs overflow-x-auto font-mono text-gray-800">
-                  nohup venv/bin/python agent.py &gt; agent.log 2&gt;&amp;1 &amp;
+                  nohup venv/bin/python data-logger.py &gt; logger.log 2&gt;&amp;1 &amp;
                 </pre>
                 <p className="text-gray-500 mt-2 mb-2">실행 로그 실시간 추적 및 중단 명령어:</p>
                 <pre className="bg-light p-3.5 rounded-lg border border-gray-200 text-xs overflow-x-auto font-mono text-gray-800">
-                  tail -f agent.log{"\n"}
-                  pkill -f agent.py
+                  tail -f logger.log{"\n"}
+                  pkill -f data-logger.py
                 </pre>
               </div>
             </div>
@@ -3429,48 +3372,6 @@ while True:
         </div>
       )}
 
-      {/* Generated Agent Code Modal */}
-      {isAgentModalOpen && (
-        <div className="fixed inset-0 bg-black/60 flex justify-center items-center z-[1000] animate-in fade-in duration-200">
-          <div className="bg-white p-8 rounded-xl w-[90%] max-w-[800px] max-h-[90vh] flex flex-col shadow-2xl border-t-4 border-secondary">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-2xl font-semibold text-primary flex items-center gap-2"><Terminal size={24} /> agent.py (Remote Controller)</h3>
-              <button onClick={() => setIsAgentModalOpen(false)} className="text-gray-400 hover:text-gray-600 transition-colors"><X size={24} /></button>
-            </div>
-            
-            <div className="mb-4 text-sm text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-200">
-              <strong>💡 How to run on Raspberry Pi:</strong><br/>
-              1. Download both <code className="bg-white px-1">data-logger.py</code> and <code className="bg-white px-1">agent.py</code> to the same folder.<br/>
-              2. Install dependencies: <code className="bg-white px-1">pip install supabase python-dotenv paho-mqtt</code><br/>
-              3. Run the agent: <code className="bg-white px-1">python agent.py</code>
-            </div>
-
-            <div className="flex-1 flex flex-col bg-gray-900 rounded-lg p-4 mb-6 min-h-[300px]">
-              <textarea 
-                className="w-full flex-1 bg-transparent text-purple-400 font-mono text-sm outline-none resize-none whitespace-pre overflow-auto"
-                value={generatedAgentCode}
-                onChange={(e) => setGeneratedAgentCode(e.target.value)}
-                spellCheck={false}
-              />
-            </div>
-
-            <div className="flex gap-4">
-              <button onClick={() => { navigator.clipboard.writeText(generatedAgentCode); showNotification('Agent script copied!', 'success'); }} className="flex-1 flex items-center justify-center gap-2 bg-light hover:bg-gray-200 text-gray-800 p-3 rounded-lg font-medium transition-colors border border-gray-300">
-                <Copy size={20} /> Copy Code
-              </button>
-              <button onClick={() => {
-                const blob = new Blob([generatedAgentCode], { type: 'text/plain' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a'); a.href = url; a.download = 'agent.py'; a.click(); URL.revokeObjectURL(url);
-              }} className="flex-1 flex items-center justify-center gap-2 bg-secondary hover:bg-secondary/90 text-white p-3 rounded-lg font-medium transition-colors">
-                <Download size={20} /> Download .py File
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Add Equipment Modal */}
       {isAddEqModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex justify-center items-center z-[1000] animate-in fade-in duration-200">
           <div className="bg-white p-8 rounded-xl w-[90%] max-w-[600px] shadow-2xl">
