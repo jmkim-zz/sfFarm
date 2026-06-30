@@ -485,8 +485,8 @@ CREATE TABLE IF NOT EXISTS dynamic_telemetry (
 ALTER TABLE device_configs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE dynamic_telemetry ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow public read for configs" ON device_configs FOR SELECT USING (true);
-CREATE POLICY "Allow public read for telemetry" ON dynamic_telemetry FOR SELECT USING (true);
+CREATE POLICY "Allow public read and write for configs" ON device_configs FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public read and write for telemetry" ON dynamic_telemetry FOR ALL USING (true) WITH CHECK (true);
 
 -- 설정 데이터를 저장할 테이블 생성
 CREATE TABLE app_settings (
