@@ -26,3 +26,35 @@ export const getMqttClient = () => {
 
   return client;
 };
+
+/**
+ * 특정 기기에 장비 제어 명령(ON/OFF)을 단발성으로 Publish하고 연결을 종료합니다.
+ */
+export const publishEquipmentCommand = (deviceId: string, equipment: string, state: boolean) => {
+  const client = mqtt.connect(MQTT_BROKER_URL, {
+    username: process.env.NEXT_PUBLIC_MQTT_USERNAME,
+    password: process.env.NEXT_PUBLIC_MQTT_PASSWORD,
+  });
+
+  client.on('connect', () => {
+    // 아두이노 스케치 생성 규칙(Rule 11)에 맞춘 정확한 토픽과 페이로드 형식
+    // 토픽 예: smartfarm/pooh/equipment/circulationFan/set
+    const topic = `smartfarm/${deviceId}/equipment/${equipment}/set`;
+    // 페이로드 예: "ON" 또는 "OFF" (JSON이 아닌 순수 문자열)
+    const payload = state ? 'ON' : 'OFF';
+    
+    client.publish(topic, payload, { qos: 1 }, (err) => {
+      if (err) {
+        console.error('[Web MQTT] Publish failed:', err);
+      } else {
+        console.log(`[Web MQTT] Published command -> Topic: ${topic}, Payload: ${payload}`);
+      }
+      client.end(); // 전송 후 연결 종료 (일회성)
+    });
+  });
+
+  client.on('error', (err) => {
+    console.error('[Web MQTT] Publish connection error:', err);
+    client.end();
+  });
+};

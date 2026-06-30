@@ -37,7 +37,7 @@ function useNotification() {
 function EquipmentItem({ 
   name, icon, details, description, isOn, onToggle, isActive = true, schedule
 }: { 
-  name: string, icon: string, details: string, description: string, isOn: boolean, onToggle: (state: boolean) => void, isActive?: boolean, schedule?: { start: string, stop: string, isContinuous?: boolean }
+  name: string, icon: string, details: string, description: string, isOn: boolean, onToggle: (state: boolean) => void, isActive?: boolean, schedule?: any
 }) {
   return (
     <div className={`flex justify-between items-center p-5 bg-light rounded-xl transition-all ${isActive ? 'hover:bg-gray-200' : 'opacity-40 grayscale pointer-events-none'}`}>
@@ -62,14 +62,44 @@ function EquipmentItem({
           </label>
         </div>
         {schedule && (
-          <div className="text-xs text-gray-500 font-medium text-right mt-1">
-            {schedule.isContinuous ? (
-              <span className="text-secondary font-semibold">24-Hour Continuous</span>
-            ) : (
-              <>
-                <div className="mb-0.5">Start Time: {schedule.start}</div>
-                <div>Stop Time: {schedule.stop}</div>
-              </>
+          <div className="text-xs text-gray-500 font-medium text-right mt-1.5 flex flex-col items-end gap-1">
+            {/* Active Window */}
+            {(schedule.activeWindow || schedule.start || schedule.isContinuous) && (
+              <div className="text-primary flex items-center gap-1">
+                <i className="mdi mdi-clock-outline"></i>
+                {(schedule.activeWindow?.isContinuous ?? schedule.isContinuous) 
+                  ? '24-Hour Continuous' 
+                  : `${schedule.activeWindow?.start ?? schedule.start} - ${schedule.activeWindow?.stop ?? schedule.stop}`
+                }
+              </div>
+            )}
+            
+            {/* Operation Mode */}
+            {schedule.operationMode && (
+              <div className="text-secondary flex flex-col items-end">
+                <div className="flex items-center gap-1">
+                  <i className="mdi mdi-cog-outline"></i>
+                  Mode: {schedule.operationMode.type === 'alwaysOn' ? 'Always ON' : schedule.operationMode.type === 'sensor' ? 'Sensor Control' : 'Duty Cycle Timer'}
+                </div>
+                {schedule.operationMode.type === 'sensor' && schedule.operationMode.sensorConfig && (
+                  <span className="text-[10px] text-gray-400 mt-0.5">
+                    Target: {schedule.operationMode.sensorConfig.targetSensor} ({schedule.operationMode.sensorConfig.behavior} {schedule.operationMode.sensorConfig.targetValue} ±{schedule.operationMode.sensorConfig.deadband})
+                  </span>
+                )}
+                {schedule.operationMode.type === 'timer' && schedule.operationMode.timerConfig && (
+                  <span className="text-[10px] text-gray-400 mt-0.5">
+                    ({schedule.operationMode.timerConfig.onDurationMinutes}m ON / {schedule.operationMode.timerConfig.offDurationMinutes}m OFF)
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Safety Override */}
+            {schedule.safetyOverride && schedule.safetyOverride.enabled && (
+              <div className="text-danger flex items-center gap-1">
+                <i className="mdi mdi-shield-alert-outline"></i>
+                Safety: {schedule.safetyOverride.sensor} {schedule.safetyOverride.condition === 'above' ? '>' : '<'} {schedule.safetyOverride.thresholdValue}
+              </div>
             )}
           </div>
         )}
@@ -214,7 +244,7 @@ export function useSupabaseSensors(deviceId: string | null) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [deviceId]);
 
   return sensors;
 }
@@ -326,6 +356,37 @@ export function useEquipmentControl(deviceId: string | null, showNotification: (
       }
     };
     loadEquipmentStates();
+
+    // Python Edge Server가 자율 제어로 DB를 업데이트할 때 UI에 즉시 반영하기 위한 Polling
+    const intervalId = setInterval(loadEquipmentStates, 3000);
+    
+    // Realtime 구독 (Supabase에 app_settings가 Realtime 활성화되어 있는 경우)
+    const channel = supabase
+      .channel(`equipment_status_updates_${deviceId}_${Date.now()}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'app_settings', filter: `key=eq.sf_equipment_status_${deviceId}` },
+        (payload) => {
+          if (payload.new && payload.new.value) {
+            setEquipment(prev => ({ ...prev, ...payload.new.value }));
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'app_settings', filter: `key=eq.sf_custom_equipment_status_${deviceId}` },
+        (payload) => {
+          if (payload.new && payload.new.value) {
+            setCustomEquipmentStates(prev => ({ ...prev, ...payload.new.value }));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      clearInterval(intervalId);
+      supabase.removeChannel(channel);
+    };
   }, [deviceId]);
 
   const toggleEquipment = (key: string, state: boolean, isCustom: boolean = false, customName: string = '') => {
@@ -441,7 +502,8 @@ CREATE POLICY "Allow public read and write" ON app_settings FOR ALL USING (true)
 -- 3. 실시간 차트 및 상태 업데이트를 위한 설정
 -- dynamic_telemetry 및 device_configs 테이블을 supabase_realtime 복제 목록에 추가
 ALTER PUBLICATION supabase_realtime ADD TABLE dynamic_telemetry;
-ALTER PUBLICATION supabase_realtime ADD TABLE device_configs;`;
+ALTER PUBLICATION supabase_realtime ADD TABLE device_configs;
+ALTER PUBLICATION supabase_realtime ADD TABLE app_settings;`;
 
 export const SENSOR_METADATA: Record<string, { label: string; unit: string; color: string; keys: string[] }> = {
   temperature: { label: 'Temperature', unit: '°C', color: '#e74c3c', keys: ['temp', 'temperature'] },
@@ -934,7 +996,7 @@ export default function DashboardClient() {
       upperLimit: upper
     };
 
-    const configKey = `sf_sensor_config_${newSensorName.replace(/\s+/g, '_')}`;
+    const configKey = `sf_sensor_config_${currentDeviceId}_${newSensorName.replace(/\s+/g, '_')}`;
     const initialConfig = {
       samplingRateValue: parseFloat(newSensorRateValue) || 10,
       samplingRateUnit: newSensorRateUnit,
@@ -976,7 +1038,7 @@ export default function DashboardClient() {
     const equipList = [...Object.keys(equipmentNamesList), ...customEquipments.map(eq => eq.id)];
     const newSchedules: Record<string, any> = {};
     
-    const keys = equipList.map(e => `sf_equip_schedule_${e}`);
+    const keys = equipList.map(e => `sf_equip_schedule_${currentDeviceId}_${e}`);
     const { data } = await supabase.from('app_settings').select('key, value').in('key', keys);
     
     equipList.forEach(e => {
@@ -1185,7 +1247,7 @@ export default function DashboardClient() {
     ];
     const newConfigs: Record<string, any> = {};
     
-    const keys = sensorsList.map(s => `sf_sensor_config_${s.replace(/\s+/g, '_')}`);
+    const keys = sensorsList.map(s => `sf_sensor_config_${currentDeviceId}_${s.replace(/\s+/g, '_')}`);
     const { data } = await supabase.from('app_settings').select('key, value').in('key', keys);
     
     sensorsList.forEach(s => {
@@ -2252,7 +2314,7 @@ while True:
                   const defaultSensors = ["Temperature", "Light Intensity", "Humidity", "Hydrogen Ion Concentration", "Electrical Conductivity", "Dissolved Oxygen", "Carbon Dioxide"];
                   const customNames = customSensors.map(cs => cs.name);
                   const sensorsList = [...defaultSensors, ...customNames];
-                  const keys = sensorsList.map(s => `sf_sensor_config_${s.replace(/\s+/g, '_')}`);
+                  const keys = sensorsList.map(s => `sf_sensor_config__`);
                   const { data } = await supabase.from('app_settings').select('key, value').in('key', keys);
 
                   const configs = sensorsList.map(s => {

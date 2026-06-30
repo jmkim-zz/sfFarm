@@ -48,8 +48,8 @@ Follow these strict rules:
 11. 장비(Equipment) 제어 (디지털 출력):
     - 전달된 'hardwareSettings'를 분석하여 Equipment(장비)로 매핑된 핀(Digital Output)이 있다면, \`setup()\`에서 해당 핀을 OUTPUT으로 설정하십시오.
     - 해당 장비 제어를 위해 \`smartfarm/{deviceId}/equipment/{장비명}/set\` 토픽을 구독(subscribe)하십시오.
-    - 수신된 메시지(콜백)가 'ON' 또는 'OFF'일 경우 핀의 상태(HIGH/LOW)를 제어하십시오.
-    - 제어 직후, 반드시 \`smartfarm/{deviceId}/equipment/{장비명}/state\` 토픽으로 제어된 상태('ON' 또는 'OFF')를 발행(publish)하여 상태 피드백을 로거에 전송하십시오.
+    - **[매우 중요]** 수신된 제어 메시지(콜백)는 JSON 형식이 아닌 순수한 텍스트 문자열 "ON" 또는 "OFF" 입니다. **어떤 모델이 코드를 생성하든 절대 \`deserializeJson()\` 등을 사용하여 파싱하려 시도하지 마십시오.** 수신된 \`payload\` 바이트 배열을 \`String\`으로 변환한 뒤 \`if (message == "ON")\`와 같이 단순 문자열 비교를 통해서만 핀의 상태(HIGH/LOW)를 제어해야 합니다.
+    - 제어 직후, 반드시 \`smartfarm/{deviceId}/equipment/{장비명}/state\` 토픽으로 제어된 상태("ON" 또는 "OFF" 문자열)를 발행(publish)하고, \`Serial.println\`을 통해 "=> [장비명] turned ON" 와 같이 제어 및 발행 성공 로그를 명확히 남기십시오.
 12. 시뮬레이션 모드(TDD) 및 하드웨어 격리 (가장 중요):
     - 코드 최상단에 \`#define SIMULATION_MODE 1\` 매크로를 선언할 것.
     - **WiFi 연결과 MQTT 통신(네트워크 연결)은 \`SIMULATION_MODE\` 값에 관계없이 항상 실제 실물 동작**을 수행해야 합니다. 즉, \`SIMULATION_MODE == 1\`인 경우에도 \`WiFi.begin()\`과 \`mqttClient.connect()\`를 통해 실제 네트워크 및 브로커에 접속하고, \`mqttClient.publish()\`를 통해 데이터를 실제로 발행해야 합니다. 통신 로직 자체를 격리하거나 가짜 상태로 조기 리턴하지 마십시오.
@@ -62,7 +62,8 @@ Follow these strict rules:
     - 릴레이 제어는 Active-Low 방식이므로, 수신 메시지가 "ON"이면 핀에 \`LOW\`를, "OFF"이면 \`HIGH\`를 할당할 것.
     - \`setup()\`에서 릴레이 핀을 초기화할 때, 릴레이 오작동(Flickering)을 방지하기 위해 반드시 \`pinMode(pin, OUTPUT);\` 보다 **먼저** \`digitalWrite(pin, HIGH);\` (초기 OFF 상태)를 호출할 것.
 15. 디지털 핀 선언 표준화: 배열 등에 핀 번호를 저장할 때, 'D6', 'A0' 형태의 문자열 매크로 대신 순수 정수형(예: \`6\`, \`A0\`)을 사용할 것 (문자 'D'는 제외).
-16. 난수 생성(Simulation) 범위 확장: 시뮬레이션 모드(\`SIMULATION_MODE == 1\`)에서 발생시키는 센서 더미 데이터(난수)의 범위를 스마트팜의 좁은 '생육 적정 범위'가 아닌, **'해당 센서 하드웨어의 물리적 한계(측정 가능) 스펙'** 전체 범위로 대폭 넓혀서 생성할 것. 만약 특정 센서의 정확한 물리적 한계 스펙을 알기 어렵다면, 일반적인 생육 적정 범위(Operational Range)에 1.5를 곱하여 위아래로 더 넓은 범위의 난수를 발생시킬 것. (목적: Out of range 처리 및 대시보드 경고 표시 로직 테스트용)`;
+16. 난수 생성(Simulation) 범위 확장: 시뮬레이션 모드(\`SIMULATION_MODE == 1\`)에서 발생시키는 센서 더미 데이터(난수)의 범위를 스마트팜의 좁은 '생육 적정 범위'가 아닌, **'해당 센서 하드웨어의 물리적 한계(측정 가능) 스펙'** 전체 범위로 대폭 넓혀서 생성할 것. 만약 특정 센서의 정확한 물리적 한계 스펙을 알기 어렵다면, 일반적인 생육 적정 범위(Operational Range)에 1.5를 곱하여 위아래로 더 넓은 범위의 난수를 발생시킬 것. (목적: Out of range 처리 및 대시보드 경고 표시 로직 테스트용)
+17. C++ 문법 주의 (switch-case 스코프 오류): \`switch-case\` 문 내부의 특정 \`case\`에서 지역 변수(예: \`float phValue = ...;\`)를 선언할 때는 반드시 해당 \`case\` 내부의 실행 코드를 중괄호 \`{ }\`로 감싸서 변수의 스코프(Scope)를 명확히 제한할 것. 그렇지 않으면 \`jump to case label [-fpermissive]\` 컴파일 에러가 발생함.`;
 
     // 프론트엔드에서 넘어온 하드웨어 핀 및 네트워크 설정 Payload 전달
     const prompt = `다음 하드웨어 및 네트워크 설정 정보를 바탕으로 스마트팜 아두이노 전체 스케치(.ino) 코드를 작성해 줘:\n\n${JSON.stringify(body, null, 2)}`;
