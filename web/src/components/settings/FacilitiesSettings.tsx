@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase/client';
-import { Save, Plus, Trash2, Edit2, Tractor, CheckCircle, XCircle, Settings, Cpu, Settings2, Wifi, Server, CircuitBoard } from 'lucide-react';
+import { Save, Plus, Trash2, Edit2, Tractor, CheckCircle, XCircle, Settings, Cpu, Settings2, Wifi, Server, CircuitBoard, ArrowUp, ArrowDown } from 'lucide-react';
 import { CROP_ICONS } from '../layout/Sidebar';
 import Link from 'next/link';
 import EmojiIcon from '../ui/EmojiIcon';
@@ -56,15 +56,61 @@ export default function FacilitiesSettings({ showNotification, onFacilitiesChang
   const [customSensors, setCustomSensors] = useState<any[]>([]);
   const [customEquipments, setCustomEquipments] = useState<any[]>([]);
 
+  const [facilitiesOrder, setFacilitiesOrder] = useState<string[]>([]);
+
   const fetchFacilities = async () => {
     setLoading(true);
     const { data, error } = await supabase.from('device_configs').select('*').order('device_id', { ascending: true });
+    
+    // Fetch custom order
+    const { data: orderData } = await supabase.from('app_settings').select('value').eq('key', 'sf_facilities_order').single();
+    const orderArr: string[] = orderData?.value || [];
+    setFacilitiesOrder(orderArr);
+
     if (error) {
       showNotification('Failed to fetch facilities', 'error');
     } else {
-      setFacilities(data || []);
+      let fetched = data || [];
+      // Sort by orderArr
+      fetched.sort((a, b) => {
+        const idxA = orderArr.indexOf(a.device_id);
+        const idxB = orderArr.indexOf(b.device_id);
+        if (idxA === -1 && idxB === -1) return 0;
+        if (idxA === -1) return 1;
+        if (idxB === -1) return -1;
+        return idxA - idxB;
+      });
+      setFacilities(fetched);
     }
     setLoading(false);
+  };
+
+  const moveFacility = async (index: number, direction: 'up' | 'down') => {
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === facilities.length - 1) return;
+
+    const newFacilities = [...facilities];
+    const swapIndex = direction === 'up' ? index - 1 : index + 1;
+    
+    const temp = newFacilities[index];
+    newFacilities[index] = newFacilities[swapIndex];
+    newFacilities[swapIndex] = temp;
+    
+    setFacilities(newFacilities);
+    
+    const newOrder = newFacilities.map(f => f.device_id);
+    setFacilitiesOrder(newOrder);
+    
+    const { error } = await supabase.from('app_settings').upsert({
+      key: 'sf_facilities_order',
+      value: newOrder
+    });
+    
+    if (error) {
+      showNotification('Failed to save order', 'error');
+    } else {
+      if (onFacilitiesChange) onFacilitiesChange();
+    }
   };
 
   useEffect(() => {
@@ -238,7 +284,7 @@ export default function FacilitiesSettings({ showNotification, onFacilitiesChang
                 )}
                 
                 {/* 렌더링 리스트 */}
-                {facilities.map(facility => (
+                {facilities.map((facility, idx) => (
                   <tr key={facility.device_id} className="border-b border-gray-100 hover:bg-gray-50/50">
                     <td className="p-3 font-medium text-gray-800">{facility.description || '-'}</td>
                     <td className="p-3 text-sm text-gray-600 font-mono bg-gray-100/50 rounded">{facility.device_id}</td>
@@ -279,9 +325,13 @@ export default function FacilitiesSettings({ showNotification, onFacilitiesChang
                           </Link>
                       </div>
                     </td>
-                    <td className="p-3 text-right">
-                      <button onClick={() => handleEdit(facility)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors mr-2"><Edit2 size={16} /></button>
-                      <button onClick={() => handleDelete(facility.device_id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors"><Trash2 size={16} /></button>
+                    <td className="p-3 text-right flex justify-end items-center gap-1 h-full">
+                      <div className="flex flex-col mr-2 border-r pr-2 border-gray-200">
+                        <button onClick={() => moveFacility(idx, 'up')} disabled={idx === 0} className="p-0.5 text-gray-500 hover:text-primary hover:bg-gray-100 rounded disabled:opacity-30 disabled:cursor-not-allowed" title="Move Up"><ArrowUp size={14} /></button>
+                        <button onClick={() => moveFacility(idx, 'down')} disabled={idx === facilities.length - 1} className="p-0.5 text-gray-500 hover:text-primary hover:bg-gray-100 rounded disabled:opacity-30 disabled:cursor-not-allowed" title="Move Down"><ArrowDown size={14} /></button>
+                      </div>
+                      <button onClick={() => handleEdit(facility)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors mr-1" title="Edit"><Edit2 size={16} /></button>
+                      <button onClick={() => handleDelete(facility.device_id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors" title="Delete"><Trash2 size={16} /></button>
                     </td>
                   </tr>
                 ))}

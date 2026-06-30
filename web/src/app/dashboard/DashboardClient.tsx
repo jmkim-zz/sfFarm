@@ -586,7 +586,22 @@ export default function DashboardClient() {
   const fetchFacilities = async () => {
     setSettingsUpdateTrigger(prev => prev + 1);
     const { data } = await supabase.from('device_configs').select('*').order('device_id', { ascending: true });
-    if (data) setFacilities(data);
+    
+    const { data: orderData } = await supabase.from('app_settings').select('value').eq('key', 'sf_facilities_order').single();
+    const orderArr: string[] = orderData?.value || [];
+
+    if (data) {
+      let fetched = [...data];
+      fetched.sort((a, b) => {
+        const idxA = orderArr.indexOf(a.device_id);
+        const idxB = orderArr.indexOf(b.device_id);
+        if (idxA === -1 && idxB === -1) return 0;
+        if (idxA === -1) return 1;
+        if (idxB === -1) return -1;
+        return idxA - idxB;
+      });
+      setFacilities(fetched);
+    }
   };
 
   useEffect(() => {
