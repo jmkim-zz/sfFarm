@@ -2627,29 +2627,6 @@ export default function DashboardClient() {
                 </div>
               </div>
             </div>
-
-            {/* MQTT Config */}
-            <div className="bg-white rounded-xl p-6 shadow-sm border-t-4 border-warning">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold text-primary flex items-center gap-2"><Cloud size={20}/> MQTT Configuration</h3>
-                <button onClick={handleSaveSysMqtt} className="bg-primary hover:bg-primary/90 text-white px-3 py-1.5 rounded text-sm font-medium transition-colors">Save</button>
-              </div>
-              <div className="flex flex-col gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Broker URL</label>
-                  <input type="text" placeholder="mqtts://[cluster].hivemq.cloud:8883" value={sysMqttUrl} onChange={e => setSysMqttUrl(e.target.value)} className="w-full p-2 border border-gray-300 rounded focus:border-secondary outline-none text-sm" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Username</label>
-                  <input type="text" placeholder="Username" value={sysMqttUser} onChange={e => setSysMqttUser(e.target.value)} className="w-full p-2 border border-gray-300 rounded focus:border-secondary outline-none text-sm" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Password</label>
-                  <input type="password" placeholder="Password" value={sysMqttPass} onChange={e => setSysMqttPass(e.target.value)} className="w-full p-2 border border-gray-300 rounded focus:border-secondary outline-none text-sm" />
-                </div>
-              </div>
-            </div>
-
             {/* Gemini API Config */}
             <div className="bg-white rounded-xl p-6 shadow-sm border-t-4 border-purple-500">
               <div className="flex justify-between items-center mb-4">

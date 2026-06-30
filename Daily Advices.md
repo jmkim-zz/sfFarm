@@ -82,7 +82,8 @@
 2. **글로벌 정렬 동기화:** 화살표 버튼을 눌러 순서를 바꾸면, 즉시 데이터베이스에 저장되며 **Home 탭의 대형 시설별 요약 카드**와 **최상단의 시설 선택 가로 탭** 등 대시보드의 모든 곳에 동일한 순서가 동기화되어 나타납니다.
 
 ### 7. 불필요한 시스템 중복 기능 제거 및 UI 개선
-1. **System Settings 내 중복 UI 제거:** 기존에 System Settings 탭과 Facilities(아두이노 설정) 탭에 중복으로 존재하여 사용성 혼란을 주던 구형 'WiFi Setup (For Devices)' 수동 입력 폼을 완전히 삭제했습니다. 이제 라즈베리파이는 'WiFi Scan & Setup'으로, 아두이노는 각 시설의 설정 메뉴에서만 관리하도록 책임이 명확히 분리되었습니다.
+1. **System Settings 내 중복 UI 제거 (WiFi):** 기존에 System Settings 탭과 Facilities(아두이노 설정) 탭에 중복으로 존재하여 사용성 혼란을 주던 구형 'WiFi Setup (For Devices)' 수동 입력 폼을 완전히 삭제했습니다. 이제 라즈베리파이는 'WiFi Scan & Setup'으로, 아두이노는 각 시설의 설정 메뉴에서만 관리하도록 책임이 명확히 분리되었습니다.
+2. **System Settings 내 중복 UI 제거 (MQTT):** 마찬가지로 아두이노 설정(Network & MQTT Configuration)과 완벽하게 기능이 중복되고 실제로 사용되지 않던 레거시 코드인 'MQTT Configuration' 패널을 `System Settings`에서 완전히 삭제하여 대시보드 구조를 더욱 직관적이고 깔끔하게 개선했습니다.
 
 ### 8. 대시보드 상태 동기화 및 React 18 Strict Mode 버그 해결
 1. **기본(Default) 시설 상태값 동기화 오류 해결:** `currentDeviceId` (주소창의 현재 ID 파라미터)가 비어있을 때 발생하는 버그를 수정했습니다. 주소창이 비어있으면 UI에서는 첫 번째 시설을 자동으로 보여주지만, 백그라운드 데이터 요청 로직은 여전히 `null` 값을 기반으로 데이터를 찾고 있어서 발생한 현상입니다.
