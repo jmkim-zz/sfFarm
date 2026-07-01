@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { LayoutGrid, Play, ChevronRight, Square, FolderOpen, SlidersHorizontal, CheckCircle, AlertTriangle, XCircle, Info, X, Cpu, Settings2, Users, CircuitBoard, Wifi, Copy, Download, Code, Server, Terminal, Database, Key, Cloud, FileCode2, Tractor, Thermometer, Droplets, Sun, Activity, Settings, Maximize2, Plus, Trash2, Shield, Leaf, LayoutDashboard, Calendar, RefreshCw, Smartphone, MapPin, Save, FileText } from 'lucide-react';
+import { LayoutGrid, Play, ChevronRight, Square, FolderOpen, SlidersHorizontal, CheckCircle, AlertTriangle, XCircle, Info, X, Cpu, Settings2, Users, CircuitBoard, Wifi, Copy, Download, Code, Server, Terminal, Database, Key, Cloud, FileCode2, Tractor, Thermometer, Droplets, Sun, Activity, Settings, Maximize2, Plus, Trash2, Shield, Leaf, LayoutDashboard, Calendar, RefreshCw, Smartphone, MapPin, Save, FileText, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '../../lib/supabase/client';
 import FacilitiesSettings from '../../components/settings/FacilitiesSettings';
 import FarmingJournal from '../../components/dashboard/FarmingJournal';
@@ -1325,9 +1325,11 @@ export default function DashboardClient() {
   });
   const [wifiSsid, setWifiSsid] = useState('');
   const [wifiPassword, setWifiPassword] = useState('');
+  const [showWifiPassword, setShowWifiPassword] = useState(false);
   const [mqttServer, setMqttServer] = useState('');
   const [mqttUsername, setMqttUsername] = useState('');
   const [mqttPassword, setMqttPassword] = useState('');
+  const [showMqttPassword, setShowMqttPassword] = useState(false);
   const [pinCounts, setPinCounts] = useState<Record<string, number>>({ I2C: 2 });
   const [generatedCode, setGeneratedCode] = useState<string>('');
   const [isCodeModalOpen, setIsCodeModalOpen] = useState(false);
@@ -2825,7 +2827,12 @@ export default function DashboardClient() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">WiFi Password</label>
-                    <input type="password" placeholder="Enter WiFi Password" value={wifiPassword} onChange={e => setWifiPassword(e.target.value)} className="w-full p-2.5 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors bg-white" />
+                    <div className="relative">
+                      <input type={showWifiPassword ? "text" : "password"} placeholder="Enter WiFi Password" value={wifiPassword} onChange={e => setWifiPassword(e.target.value)} className="w-full p-2.5 pr-10 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors bg-white" />
+                      <button type="button" onClick={() => setShowWifiPassword(!showWifiPassword)} className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors">
+                        {showWifiPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
                   </div>
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 mb-1">MQTT Server URL</label>
@@ -2837,7 +2844,12 @@ export default function DashboardClient() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">MQTT Password</label>
-                    <input type="password" placeholder="Enter MQTT Password" value={mqttPassword} onChange={e => setMqttPassword(e.target.value)} className="w-full p-2.5 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors bg-white" />
+                    <div className="relative">
+                      <input type={showMqttPassword ? "text" : "password"} placeholder="Enter MQTT Password" value={mqttPassword} onChange={e => setMqttPassword(e.target.value)} className="w-full p-2.5 pr-10 border border-gray-300 rounded-lg focus:border-secondary outline-none transition-colors bg-white" />
+                      <button type="button" onClick={() => setShowMqttPassword(!showMqttPassword)} className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors">
+                        {showMqttPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

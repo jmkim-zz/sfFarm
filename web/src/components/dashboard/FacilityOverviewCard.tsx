@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { useSupabaseSensors, useSystemSettings, useEquipmentControl } from '../../app/dashboard/DashboardClient';
 import { CROP_ICONS } from '../layout/Sidebar';
 import EmojiIcon from '../ui/EmojiIcon';
-import { Calendar as CalendarIcon, MapPin } from 'lucide-react';
+import { Calendar as CalendarIcon, MapPin, Maximize2, Video, VideoOff, PlayCircle } from 'lucide-react';
 import { getEvents } from '../../lib/calendar/googleCalendar';
 
 export default function FacilityOverviewCard({ deviceId, facilityName, showNotification, SENSOR_METADATA, crops = [], colorIndex = 0 }: any) {
@@ -15,12 +15,57 @@ export default function FacilityOverviewCard({ deviceId, facilityName, showNotif
   const [mqttServer, setMqttServer] = useState('');
   const [remoteLoggerRunning, setRemoteLoggerRunning] = useState(false);
   const [dbConnected, setDbConnected] = useState(false);
+  const [cameras, setCameras] = useState<{id: string, name: string, url: string}[]>([]);
+  const [playingCameras, setPlayingCameras] = useState<Record<string, boolean>>({});
 
   const [customSensors, setCustomSensors] = useState<any[]>([]);
   const [customEquipments, setCustomEquipments] = useState<any[]>([]);
   const [sensorConfigs, setSensorConfigs] = useState<Record<string, any>>({});
   
   const [maintenanceEvents, setMaintenanceEvents] = useState<any[]>([]);
+  const [lastSeen, setLastSeen] = useState<Date | null>(null);
+
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+
+    const fetchLastSeen = async () => {
+      const { data, error } = await supabase
+        .from('dynamic_telemetry')
+        .select('created_at')
+        .eq('device_id', deviceId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      if (data && !error) {
+        setLastSeen(new Date(data.created_at));
+      }
+    };
+    
+    fetchLastSeen();
+
+    const channel = supabase.channel(`realtime-lastseen-${deviceId}-${Date.now()}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'dynamic_telemetry', filter: `device_id=eq.${deviceId}` },
+        (payload) => {
+          if (payload.new && payload.new.created_at) {
+            setLastSeen(new Date(payload.new.created_at));
+          } else {
+            setLastSeen(new Date());
+          }
+        }
+      ).subscribe();
+      
+    // Re-render periodically to update status based on time elapsed
+    intervalId = setInterval(() => {
+        setLastSeen(prev => prev ? new Date(prev.getTime()) : null);
+    }, 30000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(intervalId);
+    };
+  }, [deviceId]);
 
   useEffect(() => {
     // Check DB Connection
@@ -57,6 +102,20 @@ export default function FacilityOverviewCard({ deviceId, facilityName, showNotif
       // Custom Equipments
       const { data: ce } = await supabase.from('app_settings').select('value').eq('key', `sf_custom_equipment_${deviceId}`).single();
       if (ce?.value) setCustomEquipments(ce.value);
+
+      // Cameras Array
+      const { data: camData } = await supabase.from('app_settings').select('value').eq('key', `sf_cameras_${deviceId}`).single();
+      if (camData?.value && Array.isArray(camData.value)) {
+        setCameras(camData.value);
+      } else {
+        // Fallback for old single camera config (optional, but good for safety)
+        const { data: oldCam } = await supabase.from('app_settings').select('value').eq('key', `sf_camera_url_${deviceId}`).single();
+        if (oldCam?.value) {
+          setCameras([{ id: 'default', name: 'Camera', url: oldCam.value }]);
+        } else {
+          setCameras([]);
+        }
+      }
     };
     loadData();
   }, [deviceId]);
@@ -206,18 +265,78 @@ export default function FacilityOverviewCard({ deviceId, facilityName, showNotif
             {/* WiFi SSID Card */}
             <div className="flex justify-between items-center p-3.5 bg-light rounded-xl">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-secondary/10 flex items-center justify-center text-secondary">
+                <div className={`w-8 h-8 rounded-lg ${lastSeen && (new Date().getTime() - lastSeen.getTime() < 5 * 60 * 1000) ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'} flex items-center justify-center`}>
                   <i className="mdi mdi-wifi text-lg"></i>
                 </div>
                 <div>
-                  <span className="block text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Wi-Fi Network</span>
-                  <span className="text-sm font-bold text-primary">{wifiSsid || 'Not configured'}</span>
+                  <span className="block text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Connection Status</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-primary">{wifiSsid || 'Wired/Local'}</span>
+                    <span className="text-[10px] text-gray-400">
+                      {lastSeen ? `(Last seen: ${lastSeen.toLocaleTimeString()})` : ''}
+                    </span>
+                  </div>
                 </div>
               </div>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${wifiSsid ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>
-                {wifiSsid ? 'Wired' : 'Offline'}
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${lastSeen && (new Date().getTime() - lastSeen.getTime() < 5 * 60 * 1000) ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>
+                {lastSeen && (new Date().getTime() - lastSeen.getTime() < 5 * 60 * 1000) ? 'Online' : 'Offline'}
               </span>
             </div>
+          </div>
+        </div>
+
+        {/* Live Camera Stream (Tapo C110 via MediaMTX) */}
+        <div className="lg:col-span-2 bg-white rounded-2xl p-6 shadow-[0_4px_20px_rgba(0,0,0,0.03)] border border-gray-100 flex flex-col space-y-4">
+          <div className="flex justify-between items-center">
+            <h3 className="text-lg font-bold text-primary flex items-center gap-2">
+              <span className="w-1.5 h-4 bg-primary rounded-full"></span>
+              Live Camera Streams
+            </h3>
+          </div>
+          
+          {/* 다중 카메라 확장을 고려한 Flex Wrap 컨테이너 (배경색 없음) */}
+          <div className="flex-1 flex flex-wrap gap-4 content-start min-h-[200px]">
+            {cameras.length > 0 ? (
+              cameras.map((cam) => {
+                if (!cam.url) return null;
+                const isPlaying = playingCameras[cam.id] || false;
+                
+                return (
+                  <div key={cam.id} className="h-full min-h-[200px] max-h-[250px] aspect-video bg-gray-900 rounded-xl overflow-hidden relative shadow-sm border border-gray-800 group">
+                    {/* Camera Title Overlay */}
+                    <div className="absolute top-0 inset-x-0 p-2 bg-gradient-to-b from-black/70 to-transparent z-10 flex justify-between items-start pointer-events-none">
+                      <span className="text-white text-xs font-semibold px-2 py-0.5 rounded bg-black/40 backdrop-blur-sm shadow-sm">{cam.name}</span>
+                      <a href={cam.url} target="_blank" rel="noreferrer" className="text-white/60 hover:text-white transition-colors pointer-events-auto" title="Open in new tab">
+                        <Maximize2 size={14} />
+                      </a>
+                    </div>
+                    
+                    {!isPlaying ? (
+                      <div 
+                        className="absolute inset-0 flex flex-col items-center justify-center cursor-pointer bg-black/60 hover:bg-black/40 transition-colors z-0"
+                        onClick={() => setPlayingCameras(prev => ({...prev, [cam.id]: true}))}
+                      >
+                        <PlayCircle className="w-12 h-12 text-white opacity-80 group-hover:opacity-100 group-hover:scale-110 transition-all duration-300" />
+                        <span className="text-white mt-2 text-xs font-medium tracking-wide">Play Stream</span>
+                      </div>
+                    ) : (
+                      <iframe 
+                        src={cam.url} 
+                        className="absolute inset-0 w-full h-full border-0 z-0"
+                        allow="autoplay; fullscreen"
+                        sandbox="allow-same-origin allow-scripts"
+                      ></iframe>
+                    )}
+                  </div>
+                );
+              })
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center p-6 bg-gray-50 rounded-xl border border-gray-100 border-dashed min-h-[200px]">
+                <VideoOff className="w-12 h-12 text-gray-400 mb-3" />
+                <p className="text-gray-500 text-sm font-medium">등록된 카메라가 없습니다.</p>
+                <p className="text-gray-400 text-xs mt-1">시스템 설정(Facilities)에서 카메라를 추가해주세요.</p>
+              </div>
+            )}
           </div>
         </div>
       </div>

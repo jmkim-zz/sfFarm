@@ -55,6 +55,7 @@ export default function FacilitiesSettings({ showNotification, onFacilitiesChang
   const [activeEquipment, setActiveEquipment] = useState<Record<string, boolean>>({});
   const [customSensors, setCustomSensors] = useState<any[]>([]);
   const [customEquipments, setCustomEquipments] = useState<any[]>([]);
+  const [cameras, setCameras] = useState<{id: string, name: string, url: string}[]>([]);
 
   const [facilitiesOrder, setFacilitiesOrder] = useState<string[]>([]);
 
@@ -121,13 +122,15 @@ export default function FacilitiesSettings({ showNotification, onFacilitiesChang
     const keys = [
       `sf_wifi_config_${deviceId}`,
       `sf_active_sensors_${deviceId}`,
-      `sf_active_equipment_${deviceId}`
+      `sf_active_equipment_${deviceId}`,
+      `sf_cameras_${deviceId}`
     ];
     const { data } = await supabase.from('app_settings').select('key, value').in('key', keys);
     
     const wifi = data?.find(d => d.key === `sf_wifi_config_${deviceId}`)?.value || { ssid: '', password: '' };
     const sensors = data?.find(d => d.key === `sf_active_sensors_${deviceId}`)?.value || {};
     const equip = data?.find(d => d.key === `sf_active_equipment_${deviceId}`)?.value || {};
+    const cams = data?.find(d => d.key === `sf_cameras_${deviceId}`)?.value || [];
 
     // Initialize defaults if missing
     DEFAULT_SENSORS.forEach(s => {
@@ -140,6 +143,7 @@ export default function FacilitiesSettings({ showNotification, onFacilitiesChang
     setWifiConfig(wifi);
     setActiveSensors(sensors);
     setActiveEquipment(equip);
+    setCameras(Array.isArray(cams) ? cams : []);
   };
 
   const handleEdit = async (facility: Facility) => {
@@ -163,6 +167,7 @@ export default function FacilitiesSettings({ showNotification, onFacilitiesChang
     setWifiConfig({ ssid: '', password: '' });
       setCustomSensors([]);
       setCustomEquipments([]);
+      setCameras([]);
     const defaultS: any = {};
     DEFAULT_SENSORS.forEach(s => defaultS[s.id] = true);
     setActiveSensors(defaultS);
@@ -198,7 +203,8 @@ export default function FacilitiesSettings({ showNotification, onFacilitiesChang
     await supabase.from('app_settings').upsert([
       { key: `sf_wifi_config_${editForm.device_id}`, value: wifiConfig },
       { key: `sf_active_sensors_${editForm.device_id}`, value: activeSensors },
-      { key: `sf_active_equipment_${editForm.device_id}`, value: activeEquipment }
+      { key: `sf_active_equipment_${editForm.device_id}`, value: activeEquipment },
+      { key: `sf_cameras_${editForm.device_id}`, value: cameras }
     ]);
 
     showNotification('Facility saved successfully.', 'success');
@@ -400,6 +406,61 @@ export default function FacilitiesSettings({ showNotification, onFacilitiesChang
                         onChange={e => setEditForm({...editForm, mqtt_topic: e.target.value})}
                         className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-secondary/50 focus:border-secondary outline-none transition-all font-mono text-sm"
                       />
+                    </div>
+                    <div className="md:col-span-2 mt-4 border-t pt-4">
+                      <div className="flex justify-between items-center mb-2">
+                        <label className="block text-sm font-medium text-gray-700 flex items-center gap-2">Live Camera Streams</label>
+                        <button 
+                          onClick={() => setCameras([...cameras, { id: Date.now().toString(), name: `카메라 ${cameras.length + 1}`, url: '' }])}
+                          className="text-xs flex items-center gap-1 bg-secondary text-white px-2 py-1 rounded hover:bg-secondary-dark transition-colors"
+                        >
+                          <Plus size={14} /> 추가
+                        </button>
+                      </div>
+                      
+                      {cameras.length === 0 ? (
+                        <p className="text-xs text-gray-400 italic bg-gray-50 p-3 rounded border border-dashed border-gray-200">설정된 카메라가 없습니다. 추가 버튼을 눌러 카메라를 등록하세요.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {cameras.map((cam, idx) => (
+                            <div key={cam.id} className="flex flex-col sm:flex-row gap-2 bg-gray-50 p-2 rounded border border-gray-200 items-start sm:items-center">
+                              <input 
+                                type="text" 
+                                value={cam.name} 
+                                onChange={e => {
+                                  const newCams = [...cameras];
+                                  newCams[idx].name = e.target.value;
+                                  setCameras(newCams);
+                                }}
+                                placeholder="이름 (예: A동 전면)"
+                                className="w-full sm:w-1/3 p-2 bg-white border border-gray-200 rounded focus:ring-1 focus:ring-secondary outline-none text-sm"
+                              />
+                              <input 
+                                type="text" 
+                                value={cam.url} 
+                                onChange={e => {
+                                  const newCams = [...cameras];
+                                  newCams[idx].url = e.target.value;
+                                  setCameras(newCams);
+                                }}
+                                placeholder="http://[IP]:8889/cam/"
+                                className="w-full flex-1 p-2 bg-white border border-gray-200 rounded focus:ring-1 focus:ring-secondary outline-none text-sm"
+                              />
+                              <button 
+                                onClick={() => {
+                                  const newCams = [...cameras];
+                                  newCams.splice(idx, 1);
+                                  setCameras(newCams);
+                                }}
+                                className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                title="삭제"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
